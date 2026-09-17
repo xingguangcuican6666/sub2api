@@ -28,7 +28,7 @@
 
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
-        <div v-if="(!isCNApiKeyAccount || editApiProtocol !== 'adaptive') && !(account.platform === 'zcode' && editZcodePlan === 'start-plan')">
+        <div v-if="(!isCNApiKeyAccount || editApiProtocol !== 'adaptive') && !(account.platform === 'zcode' && isZcodeTrialPlan(editZcodePlan))">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
             v-model="editBaseUrl"
@@ -3119,6 +3119,8 @@ import {
   defaultCNBaseUrl,
   isCNProviderPlatform,
   defaultZcodeBaseUrl,
+  isZcodeTrialPlan,
+  resolveZcodePlan,
   ZCODE_PLANS,
   ZCODE_PROVIDERS,
   ZCODE_START_PLAN_BASE_URL,
@@ -4268,7 +4270,7 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     const credentials = newAccount.credentials as Record<string, unknown>
     if (newAccount.platform === 'zcode') {
       editZcodeProvider.value = credentials.provider === 'bigmodel' ? 'bigmodel' : 'zai'
-      editZcodePlan.value = credentials.plan === 'start-plan' ? 'start-plan' : 'coding-plan'
+      editZcodePlan.value = resolveZcodePlan(credentials.plan)
       // secret/jwt 为敏感键，响应已脱敏；仅在用户显式输入时轮换。
       editZcodeSecret.value = ''
       editZcodeJwt.value = ''
@@ -5090,8 +5092,8 @@ const handleSubmit = async () => {
         if (editZcodeJwt.value.trim()) {
           newCredentials.jwt = editZcodeJwt.value.trim()
         }
-        if (editZcodePlan.value === 'start-plan') {
-          // start-plan 固定走 zcode.z.ai 网关，base_url 不参与端点解析。
+        if (isZcodeTrialPlan(editZcodePlan.value)) {
+          // 试用/活动套餐固定走 zcode.z.ai 网关，base_url 不参与端点解析。
           delete newCredentials.base_url
         }
       }

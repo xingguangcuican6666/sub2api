@@ -1099,7 +1099,7 @@ export default {
       zcode: {
         provider: '上游供应商',
         plan: '接入计划',
-        planHint: 'Coding Plan 使用永久 API Key 直连 Anthropic 兼容端点；Start Plan 携带 OAuth JWT 经 zcode.z.ai 网关转发。',
+        planHint: 'Coding Plan 使用永久 API Key 直连 Anthropic 兼容端点；试用/活动套餐（Start Plan / Global Build / Weekend）携带 OAuth JWT 经 zcode.z.ai 网关转发。',
         secret: 'API Key Secret（仅 zai）',
         jwt: 'Plan JWT（start-plan）',
         jwtPlaceholder: 'OAuth 登录捕获的 JWT',

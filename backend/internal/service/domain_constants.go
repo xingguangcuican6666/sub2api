@@ -109,10 +109,13 @@ const (
 	ZcodeProviderZai      = "zai"
 	ZcodeProviderBigmodel = "bigmodel"
 
-	// ZCode 接入计划：coding-plan 直连推理端点（API Key）；start-plan 经
-	// zcode.z.ai 网关（OAuth JWT）。
-	ZcodePlanCoding = "coding-plan"
-	ZcodePlanStart  = "start-plan"
+	// ZCode 接入计划：coding-plan 直连推理端点（API Key）；其余为试用/活动
+	// 套餐，统一经 zcode.z.ai 网关（OAuth JWT）——Global Build 与 Weekend 是
+	// 营销活动套餐，领取后同样落入 start-plan 配额，由网关按活动桶扣减。
+	ZcodePlanCoding      = "coding-plan"
+	ZcodePlanStart       = "start-plan"
+	ZcodePlanGlobalBuild = "global-build"
+	ZcodePlanWeekend     = "weekend"
 
 	DefaultZcodeZaiAnthropicBaseURL      = "https://api.z.ai/api/anthropic"
 	DefaultZcodeBigmodelAnthropicBaseURL = "https://open.bigmodel.cn/api/anthropic"

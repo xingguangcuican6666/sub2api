@@ -184,7 +184,8 @@ func BuildZcodeTraceHeaders(plan string) map[string]string {
 		"x-zcode-session-type": "main",
 		"x-zcode-trace-id":     zcodeRandomUUID(),
 	}
-	if plan != ZcodePlanStart {
+	// 仅 coding-plan 携带 query/session 归因；试用/活动套餐与官方客户端一致不携带。
+	if plan == ZcodePlanCoding {
 		headers["x-query-id"] = zcodeRandomUUID()
 		headers["x-session-id"] = zcodeRandomUUID()
 	}
@@ -194,17 +195,19 @@ func BuildZcodeTraceHeaders(plan string) map[string]string {
 // ApplyZcodeUpstreamHeaders 注入 ZCode 上游请求的认证、身份指纹与归因头。
 //   - coding-plan：x-api-key 与 Authorization: Bearer 双头同值（bundle `ebo`），
 //     User-Agent 追加 ai-sdk/anthropic SDK 后缀（bundle `Cm`/k0o）。
-//   - start-plan：Authorization: Bearer {jwt}（plan JWT）。
+//   - 试用/活动套餐（start-plan / global-build / weekend）：
+//     Authorization: Bearer {jwt}（plan JWT）。
 func ApplyZcodeUpstreamHeaders(header http.Header, account *Account) error {
 	plan := account.GetZcodePlan()
 	var credential string
-	switch plan {
-	case ZcodePlanStart:
+	if IsZcodeTrialPlan(plan) {
+		// 试用/活动套餐（Start Plan / Global Build / Weekend）统一走
+		// zcode.z.ai 网关，凭 plan JWT 鉴权。
 		credential = account.GetZcodeJWT()
 		if credential == "" {
-			return fmt.Errorf("zcode start-plan account missing jwt, re-run OAuth login")
+			return fmt.Errorf("zcode %s account missing jwt, re-run OAuth login", plan)
 		}
-	default:
+	} else {
 		credential = account.ZcodeCredentialString()
 		if credential == "" {
 			return fmt.Errorf("zcode account missing api_key")
@@ -216,7 +219,7 @@ func ApplyZcodeUpstreamHeaders(header http.Header, account *Account) error {
 	}
 	// LLM 请求的 UA 携带 anthropic SDK 后缀（与官方客户端一致）。
 	header.Set("User-Agent", identity["User-Agent"]+" "+ZcodeAnthropicSDKUA)
-	if plan != ZcodePlanStart {
+	if !IsZcodeTrialPlan(plan) {
 		header.Set("x-api-key", credential)
 	}
 	header.Set("authorization", "Bearer "+credential)

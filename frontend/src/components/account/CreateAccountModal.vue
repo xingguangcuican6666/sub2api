@@ -1444,7 +1444,7 @@
               v-model="apiKeyValue"
               type="password"
               class="input font-mono"
-              :placeholder="zcodePlan === 'start-plan' ? t('admin.accounts.zcode.apiKeyOptional') : '<api-key>.<secret>'"
+              :placeholder="isZcodeTrialPlan(zcodePlan) ? t('admin.accounts.zcode.apiKeyOptional') : '<api-key>.<secret>'"
             />
             <p class="input-hint">{{ t('admin.accounts.zcode.apiKeyHint') }}</p>
           </div>
@@ -1453,7 +1453,7 @@
             <input v-model="zcodeSecret" type="password" class="input font-mono" placeholder="secret" />
           </div>
         </template>
-        <div v-if="(!isMultiProtocolPlatform || apiProtocol !== 'adaptive') && !(form.platform === 'zcode' && zcodePlan === 'start-plan')">
+        <div v-if="(!isMultiProtocolPlatform || apiProtocol !== 'adaptive') && !(form.platform === 'zcode' && isZcodeTrialPlan(zcodePlan))">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
             v-model="apiKeyBaseUrl"
@@ -4047,6 +4047,7 @@ import {
   buildZcodeCredentials,
   defaultZcodeBaseUrl,
   isCNProviderPlatform,
+  isZcodeTrialPlan,
   isHeaderOverrideCapable,
   validateHeaderOverrideRows,
   ZCODE_PLANS,
@@ -6010,7 +6011,8 @@ const handleSubmit = async () => {
   // For apikey type, create directly
   if (form.platform === 'zcode') {
     // ZCode：start-plan 仅持 plan JWT（OAuth 登录捕获），coding-plan 需要 API Key。
-    if (zcodePlan.value === 'start-plan') {
+    if (isZcodeTrialPlan(zcodePlan.value)) {
+      // 试用/活动套餐（Start Plan / Global Build / Weekend）需要 OAuth JWT。
       if (!zcodeJwt.value.trim()) {
         appStore.showError(t('admin.accounts.zcode.jwtRequired'))
         return

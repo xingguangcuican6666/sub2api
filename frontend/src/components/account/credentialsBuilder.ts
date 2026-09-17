@@ -572,7 +572,7 @@ export function applyPlanType(
 // 与后端 service/domain_constants.go / zcode_platform.go 的常量保持一致。
 
 export type ZcodeProvider = 'zai' | 'bigmodel'
-export type ZcodePlan = 'coding-plan' | 'start-plan'
+export type ZcodePlan = 'coding-plan' | 'start-plan' | 'global-build' | 'weekend'
 
 export const ZCODE_PROVIDERS: ReadonlyArray<{ value: ZcodeProvider; label: string }> = [
   { value: 'zai', label: 'Z.AI' },
@@ -581,7 +581,9 @@ export const ZCODE_PROVIDERS: ReadonlyArray<{ value: ZcodeProvider; label: strin
 
 export const ZCODE_PLANS: ReadonlyArray<{ value: ZcodePlan; label: string }> = [
   { value: 'coding-plan', label: 'Coding Plan' },
-  { value: 'start-plan', label: 'Start Plan (Trial)' }
+  { value: 'start-plan', label: 'Start Plan (Trial)' },
+  { value: 'global-build', label: 'Global Build (Trial)' },
+  { value: 'weekend', label: 'Weekend (Trial)' }
 ]
 
 export function isZcodePlatform(platform: string): platform is 'zcode' {
@@ -595,12 +597,21 @@ export function resolveZcodeProvider(value: unknown): ZcodeProvider {
 }
 
 export function resolveZcodePlan(value: unknown): ZcodePlan {
-  return value === 'start-plan' ? 'start-plan' : 'coding-plan'
+  const plan = typeof value === 'string' ? value.trim() : ''
+  if (plan === 'start-plan' || plan === 'global-build' || plan === 'weekend') {
+    return plan
+  }
+  return 'coding-plan'
 }
 
-/** coding-plan 直连推理端点（可自定义中转）；start-plan 固定走 zcode.z.ai 网关。 */
+/** 试用/活动套餐（非 coding-plan）统一走 zcode.z.ai 网关（OAuth plan JWT）。 */
+export function isZcodeTrialPlan(plan: ZcodePlan): boolean {
+  return plan !== 'coding-plan'
+}
+
+/** coding-plan 直连推理端点（可自定义中转）；试用/活动套餐固定走 zcode.z.ai 网关。 */
 export function defaultZcodeBaseUrl(provider: ZcodeProvider, plan: ZcodePlan): string {
-  if (plan === 'start-plan') return ''
+  if (isZcodeTrialPlan(plan)) return ''
   return provider === 'bigmodel' ? 'https://open.bigmodel.cn/api/anthropic' : 'https://api.z.ai/api/anthropic'
 }
 

@@ -1029,7 +1029,7 @@ export default {
       zcode: {
         provider: 'Upstream Provider',
         plan: 'Plan',
-        planHint: 'Coding Plan posts the Anthropic-compatible endpoint with a permanent API key; Start Plan routes through the zcode.z.ai gateway with the OAuth plan JWT.',
+        planHint: 'Coding Plan posts the Anthropic-compatible endpoint with a permanent API key; trial/campaign plans (Start Plan / Global Build / Weekend) route through the zcode.z.ai gateway with the OAuth plan JWT.',
         secret: 'API Key Secret (zai only)',
         jwt: 'Plan JWT (start-plan)',
         jwtPlaceholder: 'JWT captured by OAuth login',

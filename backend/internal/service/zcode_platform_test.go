@@ -28,7 +28,7 @@ func mkZcodeAccount(provider, plan string) *Account {
 
 func TestZcodeGetAPIProtocolIsAlwaysAnthropic(t *testing.T) {
 	for _, provider := range []string{ZcodeProviderZai, ZcodeProviderBigmodel} {
-		for _, plan := range []string{ZcodePlanCoding, ZcodePlanStart} {
+		for _, plan := range []string{ZcodePlanCoding, ZcodePlanStart, ZcodePlanGlobalBuild, ZcodePlanWeekend} {
 			account := mkZcodeAccount(provider, plan)
 			require.Equal(t, APIProtocolAnthropic, account.GetAPIProtocol())
 			require.True(t, account.IsAnthropicProtocol())
@@ -41,10 +41,15 @@ func TestZcodeGetAPIProtocolIsAlwaysAnthropic(t *testing.T) {
 func TestZcodeAnthropicBaseURL(t *testing.T) {
 	require.Equal(t, DefaultZcodeZaiAnthropicBaseURL, mkZcodeAccount(ZcodeProviderZai, ZcodePlanCoding).GetZcodeAnthropicBaseURL())
 	require.Equal(t, DefaultZcodeBigmodelAnthropicBaseURL, mkZcodeAccount(ZcodeProviderBigmodel, ZcodePlanCoding).GetZcodeAnthropicBaseURL())
-	// start-plan 固定走 zcode.z.ai 网关，忽略 provider 与自定义 base_url。
-	start := mkZcodeAccount(ZcodeProviderZai, ZcodePlanStart)
-	start.Credentials["base_url"] = "https://relay.example.com/anthropic"
-	require.Equal(t, ZcodeStartPlanAnthropicBaseURL, start.GetZcodeAnthropicBaseURL())
+	// 试用/活动套餐（start-plan / global-build / weekend）固定走 zcode.z.ai 网关，
+	// 忽略 provider 与自定义 base_url。
+	for _, plan := range []string{ZcodePlanStart, ZcodePlanGlobalBuild, ZcodePlanWeekend} {
+		trial := mkZcodeAccount(ZcodeProviderZai, plan)
+		trial.Credentials["base_url"] = "https://relay.example.com/anthropic"
+		require.Equal(t, ZcodeStartPlanAnthropicBaseURL, trial.GetZcodeAnthropicBaseURL())
+		require.True(t, IsZcodeTrialPlan(plan))
+	}
+	require.False(t, IsZcodeTrialPlan(ZcodePlanCoding))
 	// coding-plan 支持自定义中转 base_url。
 	custom := mkZcodeAccount(ZcodeProviderZai, ZcodePlanCoding)
 	custom.Credentials["base_url"] = "https://relay.example.com/anthropic/"

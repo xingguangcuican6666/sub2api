@@ -1649,7 +1649,8 @@ func (a *Account) GetZcodeProvider() string {
 	}
 }
 
-// GetZcodePlan 返回 ZCode 账号的接入计划（coding-plan / start-plan），默认 coding-plan。
+// GetZcodePlan 返回 ZCode 账号的接入计划（coding-plan / start-plan /
+// global-build / weekend），默认 coding-plan。
 func (a *Account) GetZcodePlan() string {
 	if a == nil {
 		return ZcodePlanCoding
@@ -1657,8 +1658,24 @@ func (a *Account) GetZcodePlan() string {
 	switch strings.TrimSpace(a.GetCredential("plan")) {
 	case ZcodePlanStart:
 		return ZcodePlanStart
+	case ZcodePlanGlobalBuild:
+		return ZcodePlanGlobalBuild
+	case ZcodePlanWeekend:
+		return ZcodePlanWeekend
 	default:
 		return ZcodePlanCoding
+	}
+}
+
+// IsZcodeTrialPlan 报告该计划是否为试用/活动套餐（非 coding-plan）。
+// 这类计划统一走 zcode.z.ai 网关（OAuth plan JWT 鉴权）：Start Plan、
+// Global Build 与 Weekend（活动领取后落 start-plan 配额桶）。
+func IsZcodeTrialPlan(plan string) bool {
+	switch plan {
+	case ZcodePlanStart, ZcodePlanGlobalBuild, ZcodePlanWeekend:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1705,7 +1722,7 @@ func (a *Account) GetZcodeAnthropicBaseURL() string {
 	if a == nil {
 		return ""
 	}
-	if a.GetZcodePlan() == ZcodePlanStart {
+	if IsZcodeTrialPlan(a.GetZcodePlan()) {
 		return ZcodeStartPlanAnthropicBaseURL
 	}
 	if a.Type == AccountTypeAPIKey || a.Type == AccountTypeOAuth {
