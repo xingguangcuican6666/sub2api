@@ -1477,7 +1477,7 @@
             @select="onCnPresetSelect"
           />
         </div>
-        <div v-else>
+        <div v-else-if="form.platform !== 'zcode'">
           <label class="input-label">{{ t('admin.accounts.cnProviders.apiProtocol.endpoints') }}</label>
           <div class="mt-2 space-y-3">
             <div v-for="item in cnAdaptiveProtocolOptions" :key="item.value">
@@ -4452,20 +4452,36 @@ function errorMessage(err: unknown): string {
 async function startZcodeOAuth() {
   resetZcodeOAuthState()
   zcodeOAuthBusy.value = true
+  // 在用户手势上下文内同步开新标签页（异步 await 之后再 window.open 会被
+  // 浏览器弹窗拦截器拦下），拿到授权 URL 后立刻定向；开启失败时回退到
+  // 卡片内的手动链接。
+  const popup = window.open('', '_blank')
+  if (popup) {
+    popup.opener = null
+  }
   try {
     const result = await adminAPI.zcode.startLogin(zcodeProvider.value, form.proxy_id)
     zcodeOAuthSessionId.value = result.session_id
     zcodeOAuthMode.value = result.mode
     zcodeOAuthAuthorizeUrl.value = result.auth_url
-    zcodeOAuthStatusMessage.value =
-      result.mode === 'poll'
-        ? t('admin.accounts.zcode.oauth.waitingPoll')
-        : t('admin.accounts.zcode.oauth.waitingPaste')
+    if (popup && !popup.closed) {
+      popup.location.replace(result.auth_url)
+    } else {
+      zcodeOAuthStatusMessage.value = t('admin.accounts.zcode.oauth.blocked')
+    }
     if (result.mode === 'poll') {
+      zcodeOAuthStatusMessage.value = t('admin.accounts.zcode.oauth.waitingPoll')
       scheduleZcodePoll(result.session_id)
+    } else if (popup && !popup.closed) {
+      zcodeOAuthStatusMessage.value = t('admin.accounts.zcode.oauth.waitingPaste')
     }
   } catch (err) {
+    // 请求失败时关掉预开的空白标签页，避免残留。
+    if (popup && !popup.closed) {
+      popup.close()
+    }
     zcodeOAuthStatusMessage.value = errorMessage(err)
+    appStore.showError(errorMessage(err))
   } finally {
     zcodeOAuthBusy.value = false
   }

@@ -1112,6 +1112,7 @@ export default {
           start: '开始登录',
           running: '等待中…',
           openLink: '打开授权页面（授权后回到本页）',
+          blocked: '浏览器拦截了自动打开的标签页 —— 点击上方链接手动打开授权页面。',
           pasteLabel: '粘贴跳转后的回调 URL（以 http://127.0.0.1 开头）',
           pastePlaceholder: 'http://127.0.0.1:62156/oauth/callback/bigmodel?authCode=…&state=…',
           complete: '完成登录',

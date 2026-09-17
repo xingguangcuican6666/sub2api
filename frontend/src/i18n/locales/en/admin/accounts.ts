@@ -1042,6 +1042,7 @@ export default {
           start: 'Start Login',
           running: 'Waiting…',
           openLink: 'Open the authorization page (after authorizing, come back here)',
+          blocked: 'The browser blocked the auto-opened tab — click the link above to open the authorization page manually.',
           pasteLabel: 'Paste the redirected callback URL (starts with http://127.0.0.1)',
           pastePlaceholder: 'http://127.0.0.1:62156/oauth/callback/bigmodel?authCode=…&state=…',
           complete: 'Complete Login',
