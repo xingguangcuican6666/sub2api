@@ -63,6 +63,7 @@ func RegisterAdminRoutes(
 
 		// 国产供应商（kimi/zhipu/deepseek）额度与余额
 		registerCNProviderRoutes(admin, h)
+	registerZcodeRoutes(admin, h)
 
 		// 代理管理
 		registerProxyRoutes(admin, h, stepUpAuth)
@@ -502,6 +503,16 @@ func registerCNProviderRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		cn.GET("/accounts/:id/quota", h.Admin.CNProvider.QueryQuota)
 		// payg 账号余额（kimi/deepseek；zhipu 无余额端点）。
 		cn.GET("/accounts/:id/balance", h.Admin.CNProvider.QueryBalance)
+	}
+}
+
+// registerZcodeRoutes 注册 ZCode 平台（Z.AI / 智谱 GLM Coding Plan）的 OAuth 登录端点。
+func registerZcodeRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	zcode := admin.Group("/zcode/oauth")
+	{
+		zcode.POST("/url", h.Admin.ZcodeOAuth.StartLogin)
+		zcode.POST("/poll", h.Admin.ZcodeOAuth.PollLogin)
+		zcode.POST("/callback", h.Admin.ZcodeOAuth.CompleteCallback)
 	}
 }
 

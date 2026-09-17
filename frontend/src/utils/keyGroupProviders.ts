@@ -16,7 +16,8 @@ const PROVIDER_BY_PLATFORM: Record<GroupPlatform, KeyGroupProvider> = {
   grok: 'other',
   antigravity: 'other',
   composite: 'other',
-  opencode_go: 'other'
+  opencode_go: 'other',
+  zcode: 'domestic'
 }
 
 export function getKeyGroupProvider(platform: GroupPlatform): KeyGroupProvider {
@@ -27,6 +28,6 @@ export function getKeyGroupProvider(platform: GroupPlatform): KeyGroupProvider {
 export const KEY_GROUP_PROVIDER_ICONS: Record<KeyGroupProvider, GroupPlatform[]> = {
   anthropic: ['anthropic'],
   openai: ['openai'],
-  domestic: ['deepseek', 'kimi'],
+  domestic: ['deepseek', 'kimi', 'zcode'],
   other: ['gemini', 'grok']
 }

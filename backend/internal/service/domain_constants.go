@@ -49,6 +49,7 @@ const (
 	PlatformDeepseek   = domain.PlatformDeepseek
 	PlatformMiniMax    = domain.PlatformMiniMax
 	PlatformOpenCodeGo = domain.PlatformOpenCodeGo
+	PlatformZcode      = domain.PlatformZcode
 	PlatformComposite  = domain.PlatformComposite
 	// PlatformKiro is retained for unsupported-platform threshold tests and legacy
 	// account rows. Scheduling-threshold evaluation never pauses kiro accounts.
@@ -100,6 +101,49 @@ const (
 	DefaultOpenCodeZenAnthropicBaseURL = "https://opencode.ai/zen"
 )
 
+// ZCode 平台（Z.AI / 智谱 GLM Coding Plan，经 ZCode 桌面客户端身份接入）。
+// 上游统一为 Anthropic 兼容协议；凭证与额度端点随 provider 维度切换。
+// 与前端 credentialsBuilder.ts 中的预设保持一致。
+const (
+	// ZCode 上游 provider 维度：zai（Z.AI 国际站）与 bigmodel（智谱开放平台）。
+	ZcodeProviderZai      = "zai"
+	ZcodeProviderBigmodel = "bigmodel"
+
+	// ZCode 接入计划：coding-plan 直连推理端点（API Key）；start-plan 经
+	// zcode.z.ai 网关（OAuth JWT）。
+	ZcodePlanCoding = "coding-plan"
+	ZcodePlanStart  = "start-plan"
+
+	DefaultZcodeZaiAnthropicBaseURL      = "https://api.z.ai/api/anthropic"
+	DefaultZcodeBigmodelAnthropicBaseURL = "https://open.bigmodel.cn/api/anthropic"
+	// OpenAI 兼容 coding 端点仅用于模型目录匹配等协议族共用路径；推理统一走 Anthropic 端点。
+	DefaultZcodeZaiOpenAIBaseURL      = "https://api.z.ai/api/coding/paas/v4"
+	DefaultZcodeBigmodelOpenAIBaseURL = "https://open.bigmodel.cn/api/coding/paas/v4"
+
+	// zcode.z.ai 控制面（OAuth 登录 / start-plan 网关 / 额度账单）。
+	ZcodeAPIBase               = "https://zcode.z.ai/api/v1"
+	ZcodeTokenEndpoint         = ZcodeAPIBase + "/oauth/token"
+	// start-plan Anthropic 网关基址（不含 /v1/messages，nativeAnthropicTargetURL 统一拼接）。
+	ZcodeStartPlanAnthropicBaseURL = ZcodeAPIBase + "/zcode-plan/anthropic"
+	ZcodeBillingBalanceURL     = ZcodeAPIBase + "/zcode-plan/billing/balance"
+	ZcodeBillingPreviewURL     = ZcodeAPIBase + "/zcode-plan/billing/preview"
+
+	// Z.AI biz API（OAuth token → 业务 token → 自动创建 Coding Plan API Key）。
+	ZcodeZaiHost            = "https://api.z.ai"
+	ZcodeZaiLoginURL        = ZcodeZaiHost + "/api/auth/z/login"
+	ZcodeBigmodelHost       = "https://open.bigmodel.cn"
+	ZcodeBigmodelAuthorizeBase = "https://bigmodel.cn/login"
+	ZcodeBigmodelAppID      = "zcode"
+	ZcodeAPIKeyName         = "zcode-api-key"
+
+	// ZCode 桌面客户端身份（identity headers 伪装所需的最小集合）。
+	ZcodeAppVersionDefault = "3.11.2"
+	ZcodeUserAgentPrefix   = "ZCode/"
+	ZcodeAgentHeader       = "glm"
+	ZcodeAnthropicSDKUA    = "ai-sdk/anthropic/3.0.81"
+	ZcodeRefererOrigin     = "https://zcode.z.ai"
+)
+
 // IsCNProvider 报告 platform 是否为国产 OpenAI 兼容供应商（kimi/zhipu/deepseek/minimax）。
 func IsCNProvider(platform string) bool {
 	switch platform {
@@ -116,9 +160,14 @@ func IsOpenCodeGo(platform string) bool {
 }
 
 // IsMultiProtocolAPIKeyProvider 报告 platform 是否为多协议 API Key 网关
-// （国产供应商 + OpenCode）：走 OpenAI 网关、支持 adaptive 协议分流。
+// （国产供应商 + OpenCode + ZCode）：走 OpenAI 网关、支持协议分流。
 func IsMultiProtocolAPIKeyProvider(platform string) bool {
-	return IsCNProvider(platform) || platform == PlatformOpenCodeGo
+	return IsCNProvider(platform) || platform == PlatformOpenCodeGo || IsZcodeProvider(platform)
+}
+
+// IsZcodeProvider 报告 platform 是否为 ZCode 平台。
+func IsZcodeProvider(platform string) bool {
+	return platform == PlatformZcode
 }
 
 // AllowedQuotaPlatforms 是允许设置 user × platform quota 的平台列表（单一权威来源）。
@@ -135,6 +184,7 @@ var AllowedQuotaPlatforms = []string{
 	PlatformDeepseek,
 	PlatformMiniMax,
 	PlatformOpenCodeGo,
+	PlatformZcode,
 }
 
 // AllowedSchedulingThresholdPlatforms 是允许设置账号自动停调阈值的平台列表。
@@ -148,6 +198,7 @@ var AllowedSchedulingThresholdPlatforms = []string{
 	PlatformZhipu,
 	PlatformMiniMax,
 	PlatformOpenCodeGo,
+	PlatformZcode,
 }
 
 // IsAllowedQuotaPlatform 报告 s 是否为合法的 quota platform 标识。

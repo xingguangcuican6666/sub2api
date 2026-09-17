@@ -98,6 +98,7 @@ const PLATFORM_LABELS: Record<string, string> = {
   grok: 'Grok',
   kimi: 'Kimi',
   zhipu: 'Zhipu GLM',
+  zcode: 'ZCode',
   deepseek: 'DeepSeek',
   minimax: 'MiniMax',
 }

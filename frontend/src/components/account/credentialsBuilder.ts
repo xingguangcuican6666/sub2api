@@ -465,6 +465,8 @@ export function defaultCNAdaptiveBaseUrls(
 
 export function cnQuotaCellVisible(platform: string, accountMode: string): boolean {
   if (platform === 'opencode_go') return accountMode !== 'zen'
+  // zcode：额度走 zcode.z.ai 账单端点（需 OAuth JWT，探测失败在单元格内展示错误）。
+  if (platform === 'zcode') return true
   return (platform === 'kimi' || platform === 'zhipu' || platform === 'minimax') && accountMode === 'coding'
 }
 
@@ -563,5 +565,72 @@ export function applyPlanType(
   } else {
     delete credentials.plan_type
   }
+  return credentials
+}
+
+// ===== ZCode 平台（Z.AI / 智谱 GLM Coding Plan，经 ZCode 客户端身份接入） =====
+// 与后端 service/domain_constants.go / zcode_platform.go 的常量保持一致。
+
+export type ZcodeProvider = 'zai' | 'bigmodel'
+export type ZcodePlan = 'coding-plan' | 'start-plan'
+
+export const ZCODE_PROVIDERS: ReadonlyArray<{ value: ZcodeProvider; label: string }> = [
+  { value: 'zai', label: 'Z.AI' },
+  { value: 'bigmodel', label: 'BigModel / 智谱' }
+]
+
+export const ZCODE_PLANS: ReadonlyArray<{ value: ZcodePlan; label: string }> = [
+  { value: 'coding-plan', label: 'Coding Plan' },
+  { value: 'start-plan', label: 'Start Plan (Trial)' }
+]
+
+export function isZcodePlatform(platform: string): platform is 'zcode' {
+  return platform === 'zcode'
+}
+
+export const ZCODE_START_PLAN_BASE_URL = 'https://zcode.z.ai/api/v1/zcode-plan/anthropic'
+
+export function resolveZcodeProvider(value: unknown): ZcodeProvider {
+  return value === 'bigmodel' ? 'bigmodel' : 'zai'
+}
+
+export function resolveZcodePlan(value: unknown): ZcodePlan {
+  return value === 'start-plan' ? 'start-plan' : 'coding-plan'
+}
+
+/** coding-plan 直连推理端点（可自定义中转）；start-plan 固定走 zcode.z.ai 网关。 */
+export function defaultZcodeBaseUrl(provider: ZcodeProvider, plan: ZcodePlan): string {
+  if (plan === 'start-plan') return ''
+  return provider === 'bigmodel' ? 'https://open.bigmodel.cn/api/anthropic' : 'https://api.z.ai/api/anthropic'
+}
+
+/**
+ * 构建 ZCode 账号凭据。OAuth 登录结果（api_key/secret/jwt/user_id）与手动
+ * API Key 两种来源共用；api_protocol 固定 anthropic（上游仅 Anthropic 兼容端点）。
+ */
+export function buildZcodeCredentials(input: {
+  provider: ZcodeProvider
+  plan: ZcodePlan
+  apiKey: string
+  secret?: string
+  jwt?: string
+  userId?: string
+  baseUrl?: string
+}): Record<string, unknown> {
+  const credentials: Record<string, unknown> = {
+    provider: input.provider,
+    plan: input.plan,
+    api_protocol: 'anthropic'
+  }
+  const apiKey = (input.apiKey || '').trim()
+  if (apiKey) credentials.api_key = apiKey
+  const secret = (input.secret || '').trim()
+  if (secret) credentials.secret = secret
+  const jwt = (input.jwt || '').trim()
+  if (jwt) credentials.jwt = jwt
+  const userId = (input.userId || '').trim()
+  if (userId) credentials.user_id = userId
+  const baseUrl = (input.baseUrl || '').trim()
+  if (baseUrl) credentials.base_url = baseUrl
   return credentials
 }

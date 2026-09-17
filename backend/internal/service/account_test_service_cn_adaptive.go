@@ -222,12 +222,17 @@ func (s *AccountTestService) testCNProviderAnthropicConnection(c *gin.Context, a
 
 	testModelID := strings.TrimSpace(modelID)
 	if testModelID == "" {
-		testModelID = claude.DefaultTestModel
+		if account.IsZcode() {
+			testModelID = DefaultZcodeTestModel
+		} else {
+			testModelID = claude.DefaultTestModel
+		}
 	}
 	testModelID = account.GetMappedModel(testModelID)
 
 	authToken := strings.TrimSpace(account.GetOpenAIProtocolAPIKey())
-	if authToken == "" {
+	// ZCode start-plan 账号仅持 plan JWT，凭证在 ApplyZcodeUpstreamHeaders 内校验。
+	if authToken == "" && !account.IsZcode() {
 		return s.sendErrorAndEnd(c, "No API key available")
 	}
 
@@ -261,12 +266,20 @@ func (s *AccountTestService) testCNProviderAnthropicConnection(c *gin.Context, a
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 	req.Header.Set("anthropic-version", "2023-06-01")
-	for key, value := range claude.DefaultHeaders {
-		req.Header.Set(key, value)
+	if account.IsZcode() {
+		// ZCode：coding-plan 双认证头 + ZCode 桌面客户端身份指纹（不能带
+		// Claude Code 身份头，否则与官方客户端指纹不符）。
+		if err := ApplyZcodeUpstreamHeaders(req.Header, account); err != nil {
+			return s.sendErrorAndEnd(c, err.Error())
+		}
+	} else {
+		for key, value := range claude.DefaultHeaders {
+			req.Header.Set(key, value)
+		}
+		// Ollama Cloud Anthropic 兼容端点按实际 base_url 强制 Bearer，其余保持
+		// extra/default 行为。
+		setAnthropicAPIKeyAuthHeader(req.Header, account, authToken, account.GetAnthropicProtocolBaseURL())
 	}
-	// Ollama Cloud Anthropic 兼容端点按实际 base_url 强制 Bearer，其余保持
-	// extra/default 行为。
-	setAnthropicAPIKeyAuthHeader(req.Header, account, authToken, account.GetAnthropicProtocolBaseURL())
 	account.ApplyHeaderOverrides(req.Header)
 	applyOpenCodeSessionHeader(c, account, apiURL, req.Header, payloadBytes)
 

@@ -219,6 +219,12 @@ func monitorAccountQuotaCapability(account *Account) error {
 	switch account.Platform {
 	case PlatformOpenCodeGo:
 		return nil
+	case PlatformZcode:
+		// ZCode 额度走 zcode.z.ai 账单端点，需要 OAuth 登录捕获的 JWT。
+		if account.GetZcodeJWT() == "" {
+			return ErrChannelMonitorAccountNotSupportable
+		}
+		return nil
 	case PlatformKimi, PlatformZhipu, PlatformDeepseek, PlatformMiniMax:
 		if account.IsCodingPlan() {
 			if p := account.GetCodingPlanProvider(); p != PlatformKimi && p != PlatformZhipu && p != PlatformMiniMax {

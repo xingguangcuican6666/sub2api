@@ -77,6 +77,7 @@ import {
   PROVIDER_DEEPSEEK,
   PROVIDER_MINIMAX,
   PROVIDER_OPENCODE_GO,
+  PROVIDER_ZCODE,
 } from '@/constants/channelMonitor'
 
 defineProps<{
@@ -108,6 +109,7 @@ const providerFilterOptions = computed(() => [
   { value: PROVIDER_DEEPSEEK, label: t('monitorCommon.providers.deepseek') },
   { value: PROVIDER_MINIMAX, label: t('monitorCommon.providers.minimax') },
   { value: PROVIDER_OPENCODE_GO, label: t('monitorCommon.providers.opencode_go') },
+  { value: PROVIDER_ZCODE, label: t('monitorCommon.providers.zcode') },
 ])
 
 const enabledFilterOptions = computed(() => [

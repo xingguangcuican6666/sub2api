@@ -369,6 +369,12 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 		}
 	}
 
+	if account.IsZcode() {
+		// ZCode 上游为 Anthropic 兼容端点，复用 CN Anthropic 测试器
+		// （内部按平台注入 ZCode 身份头与默认模型）。
+		return s.testCNProviderAnthropicConnection(c, account, modelID)
+	}
+
 	if account.IsOpenAI() {
 		return s.testOpenAIAccountConnection(c, account, modelID, prompt, normalizeAccountTestMode(mode))
 	}

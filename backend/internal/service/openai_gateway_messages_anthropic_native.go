@@ -80,7 +80,9 @@ func (s *OpenAIGatewayService) forwardAnthropicViaNativeAnthropicEndpoint(
 		account.ID, account.Name, account.Platform, originalModel, upstreamModel, clientStream)
 
 	apiKey := strings.TrimSpace(account.GetOpenAIProtocolAPIKey())
-	if apiKey == "" {
+	// ZCode start-plan 账号仅持 plan JWT（无 api_key），凭证校验延迟到
+	// ApplyZcodeUpstreamHeaders 内做。
+	if apiKey == "" && !account.IsZcode() {
 		return nil, fmt.Errorf("account %d missing api_key", account.ID)
 	}
 	targetURL, err := s.nativeAnthropicTargetURL(account)
@@ -174,6 +176,12 @@ func (s *OpenAIGatewayService) buildNativeAnthropicUpstreamRequest(
 	// 地址而非 CC/Responses 地址），详见 helper 注释。
 	body = clampOllamaCloudAnthropicMessagesMaxTokens(account, account.GetAnthropicProtocolBaseURL(), body)
 
+	// ZCode 平台：注入官方客户端等价的 body 变换（cache_control 标记 +
+	// metadata.user_id 设备/会话 blob），在 sanitize/clamp 之后生效。
+	if account.IsZcode() {
+		body = ApplyZcodeBodyTransform(body, account)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, nil, err
@@ -199,7 +207,15 @@ func (s *OpenAIGatewayService) buildNativeAnthropicUpstreamRequest(
 	req.Header.Del("x-api-key")
 	req.Header.Del("x-goog-api-key")
 	req.Header.Del("cookie")
-	setAnthropicAPIKeyAuthHeader(req.Header, account, apiKey, account.GetAnthropicProtocolBaseURL())
+	if account.IsZcode() {
+		// ZCode：coding-plan 双认证头 + ZCode 桌面客户端身份/归因指纹；
+		// start-plan 用 plan JWT Bearer。
+		if err := ApplyZcodeUpstreamHeaders(req.Header, account); err != nil {
+			return nil, nil, err
+		}
+	} else {
+		setAnthropicAPIKeyAuthHeader(req.Header, account, apiKey, account.GetAnthropicProtocolBaseURL())
+	}
 
 	if getHeaderRaw(req.Header, "content-type") == "" {
 		setHeaderRaw(req.Header, "content-type", "application/json")

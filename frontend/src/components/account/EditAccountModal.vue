@@ -28,7 +28,7 @@
 
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
-        <div v-if="!isCNApiKeyAccount || editApiProtocol !== 'adaptive'">
+        <div v-if="(!isCNApiKeyAccount || editApiProtocol !== 'adaptive') && !(account.platform === 'zcode' && editZcodePlan === 'start-plan')">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
             v-model="editBaseUrl"
@@ -204,6 +204,49 @@
           </div>
           <p class="input-hint mt-2">{{ t('admin.accounts.cnProviders.zhipuTeam.hint') }}</p>
         </div>
+        <!-- ZCode：上游供应商 / 接入计划 / OAuth 凭据（secret 与 JWT 留空即保留原值） -->
+        <template v-if="account.platform === 'zcode'">
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label class="input-label">{{ t('admin.accounts.zcode.provider') }}</label>
+              <select v-model="editZcodeProvider" class="input">
+                <option v-for="opt in ZCODE_PROVIDERS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+              </select>
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.accounts.zcode.plan') }}</label>
+              <select v-model="editZcodePlan" class="input">
+                <option v-for="opt in ZCODE_PLANS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+              </select>
+            </div>
+          </div>
+          <div v-if="editZcodeProvider === 'zai' && editZcodePlan === 'coding-plan'">
+            <label class="input-label">{{ t('admin.accounts.zcode.secret') }}</label>
+            <input
+              v-model="editZcodeSecret"
+              type="password"
+              class="input font-mono"
+              autocomplete="new-password"
+              data-1p-ignore
+              data-lpignore="true"
+              data-bwignore="true"
+              :placeholder="account.credentials_status?.has_secret ? '••••••（留空保留）' : 'secret'"
+            />
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.zcode.jwt') }}</label>
+            <input
+              v-model="editZcodeJwt"
+              type="password"
+              class="input font-mono"
+              autocomplete="new-password"
+              data-1p-ignore
+              data-lpignore="true"
+              data-bwignore="true"
+              :placeholder="account.credentials_status?.has_jwt ? '••••••（留空保留）' : t('admin.accounts.zcode.jwtPlaceholder')"
+            />
+          </div>
+        </template>
         <div>
           <label class="input-label">{{ t('admin.accounts.apiKey') }}</label>
           <input
@@ -3075,6 +3118,10 @@ import {
   defaultCNAdaptiveBaseUrls,
   defaultCNBaseUrl,
   isCNProviderPlatform,
+  defaultZcodeBaseUrl,
+  ZCODE_PLANS,
+  ZCODE_PROVIDERS,
+  ZCODE_START_PLAN_BASE_URL,
   HEADER_OVERRIDE_ENABLED_CREDENTIAL_KEY,
   HEADER_OVERRIDES_CREDENTIAL_KEY,
   type CnAccountMode,
@@ -3083,7 +3130,9 @@ import {
   type CnProviderPlatform,
   type HeaderOverrideRow,
   type OpenCodeAccountMode,
-  type OpenCodeGoProtocolRule
+  type OpenCodeGoProtocolRule,
+  type ZcodePlan,
+  type ZcodeProvider
 } from '@/components/account/credentialsBuilder'
 import {
   formatDateTime,
@@ -3211,6 +3260,22 @@ const editOpenCodeAccountMode = ref<OpenCodeAccountMode>('go')
 function currentOpenCodeOrCNMode(): CnAccountMode | OpenCodeAccountMode {
   return props.account?.platform === 'opencode_go' ? editOpenCodeAccountMode.value : editAccountMode.value
 }
+
+// ===== ZCode 平台编辑（provider/plan 可修正；secret/JWT 留空保留后端原值） =====
+const editZcodeProvider = ref<ZcodeProvider>('zai')
+const editZcodePlan = ref<ZcodePlan>('coding-plan')
+const editZcodeSecret = ref('')
+const editZcodeJwt = ref('')
+const isZcodeApiKeyAccount = computed(() => props.account?.type === 'apikey' && props.account?.platform === 'zcode')
+
+watch(editZcodePlan, (plan, previousPlan) => {
+  if (!isZcodeApiKeyAccount.value) return
+  // 计划切换时把 base_url 重置为对应默认端点（start-plan 走 zcode.z.ai 网关，
+  // 该输入框此时隐藏，base_url 由后端忽略）。
+  if (editBaseUrl.value.trim() === defaultZcodeBaseUrl(editZcodeProvider.value, previousPlan) || !editBaseUrl.value.trim()) {
+    editBaseUrl.value = defaultZcodeBaseUrl(editZcodeProvider.value, plan) || ZCODE_START_PLAN_BASE_URL
+  }
+})
 // 智谱团队版 Coding Plan：组织/项目 ID，写入 credentials 供额度探测切换团队端点
 const editZhipuOrganization = ref('')
 const editZhipuProject = ref('')
@@ -4201,6 +4266,13 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   // Initialize API Key fields for apikey type
   if (newAccount.type === 'apikey' && newAccount.credentials) {
     const credentials = newAccount.credentials as Record<string, unknown>
+    if (newAccount.platform === 'zcode') {
+      editZcodeProvider.value = credentials.provider === 'bigmodel' ? 'bigmodel' : 'zai'
+      editZcodePlan.value = credentials.plan === 'start-plan' ? 'start-plan' : 'coding-plan'
+      // secret/jwt 为敏感键，响应已脱敏；仅在用户显式输入时轮换。
+      editZcodeSecret.value = ''
+      editZcodeJwt.value = ''
+    }
     // 国产供应商：读取 account_mode 与 api_protocol 作为可编辑初始值
     // （编辑弹窗允许修正两者，用于修复早期存错默认值的账号）。
     if (isCNProviderPlatform(newAccount.platform) || newAccount.platform === 'opencode_go') {
@@ -4274,7 +4346,9 @@ const syncFormFromAccount = (newAccount: Account | null) => {
                 newAccount.platform === 'deepseek' ||
                 newAccount.platform === 'opencode_go'
               ? defaultCNBaseUrl(newAccount.platform, currentOpenCodeOrCNMode(), editApiProtocol.value)
-              : 'https://api.anthropic.com'
+              : newAccount.platform === 'zcode'
+                ? (defaultZcodeBaseUrl(editZcodeProvider.value, editZcodePlan.value) || ZCODE_START_PLAN_BASE_URL)
+                : 'https://api.anthropic.com'
     editBaseUrl.value = isCNApiKeyAccount.value && editApiProtocol.value === 'adaptive'
       ? editAdaptiveBaseUrls.value.chat_completions
       : (credentials.base_url as string) || platformDefaultUrl
@@ -5002,6 +5076,24 @@ const handleSubmit = async () => {
       const newCredentials: Record<string, unknown> = {
         ...currentCredentials,
         base_url: newBaseUrl
+      }
+
+      // ZCode：provider/plan 写入凭据；secret/JWT 仅在用户显式输入时轮换
+      //（后端 MergePreservingSensitiveCreds 保证未提供时保留原值）。
+      if (isZcodeApiKeyAccount.value) {
+        newCredentials.provider = editZcodeProvider.value
+        newCredentials.plan = editZcodePlan.value
+        newCredentials.api_protocol = 'anthropic'
+        if (editZcodeSecret.value.trim()) {
+          newCredentials.secret = editZcodeSecret.value.trim()
+        }
+        if (editZcodeJwt.value.trim()) {
+          newCredentials.jwt = editZcodeJwt.value.trim()
+        }
+        if (editZcodePlan.value === 'start-plan') {
+          // start-plan 固定走 zcode.z.ai 网关，base_url 不参与端点解析。
+          delete newCredentials.base_url
+        }
       }
 
       // 国产供应商：模式与协议写入凭据（决定额度/余额探测与转发端点/格式）。

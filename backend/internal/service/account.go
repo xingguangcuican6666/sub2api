@@ -294,6 +294,11 @@ func (a *Account) IsCNProvider() bool {
 	return a != nil && IsCNProvider(a.Platform)
 }
 
+// IsZcode 报告是否为 ZCode 平台账号（Z.AI / 智谱 GLM Coding Plan 订阅）。
+func (a *Account) IsZcode() bool {
+	return a != nil && IsZcodeProvider(a.Platform)
+}
+
 // IsOpenAICompatible 报告账号是否走 OpenAI 网关（OpenAI 协议族）。
 // openai/grok 原生走 OpenAI 网关；国产供应商同为 OpenAI Chat Completions
 // 兼容上游，也经 OpenAI 网关转发。OpenCode 同样经 OpenAI 网关按模型分流。
@@ -1405,7 +1410,11 @@ func (a *Account) GetAccountMode() string {
 }
 
 // IsCodingPlan 报告账号是否为 Coding Plan 模式（用于滚动用量窗口冷却）。
+// ZCode 平台按 credentials["plan"] 判定（coding-plan 直连推理端点）。
 func (a *Account) IsCodingPlan() bool {
+	if a != nil && a.IsZcode() {
+		return a.GetZcodePlan() == ZcodePlanCoding
+	}
 	return a.GetAccountMode() == AccountModeCoding
 }
 
@@ -1414,7 +1423,14 @@ func (a *Account) IsCodingPlan() bool {
 // （与既有行为完全一致）。responses 协议仅 deepseek / kimi / minimax 支持（官方原生
 // Responses 端点，适配 Codex）；zhipu 无此端点。
 func (a *Account) GetAPIProtocol() string {
-	if a == nil || !a.IsMultiProtocolAPIKey() {
+	if a == nil {
+		return APIProtocolChatCompletions
+	}
+	if a.IsZcode() {
+		// ZCode 上游仅提供 Anthropic 兼容端点（与 ZCode 客户端同源），固定 anthropic。
+		return APIProtocolAnthropic
+	}
+	if !a.IsMultiProtocolAPIKey() {
 		return APIProtocolChatCompletions
 	}
 	switch strings.TrimSpace(a.GetCredential("api_protocol")) {
@@ -1545,6 +1561,9 @@ func (a *Account) GetAnthropicProtocolBaseURL() string {
 	if a == nil || (!a.IsAnthropicProtocol() && !a.IsAdaptiveAPIProtocol()) {
 		return ""
 	}
+	if a.IsZcode() {
+		return a.GetZcodeAnthropicBaseURL()
+	}
 	if a.IsAdaptiveAPIProtocol() {
 		return a.GetCNProtocolBaseURL(APIProtocolAnthropic)
 	}
@@ -1598,6 +1617,11 @@ func (a *Account) GetOpenAIFormatBaseURL() string {
 		return DefaultMiniMaxBaseURL
 	case PlatformOpenCodeGo:
 		return a.openCodeDefaultChatBaseURL()
+	case PlatformZcode:
+		if a.GetZcodeProvider() == ZcodeProviderBigmodel {
+			return DefaultZcodeBigmodelOpenAIBaseURL
+		}
+		return DefaultZcodeZaiOpenAIBaseURL
 	default:
 		return a.GetOpenAIBaseURL()
 	}
@@ -1612,12 +1636,100 @@ func (a *Account) GetCNAPIKey() string {
 	return a.GetCredential("api_key")
 }
 
+// GetZcodeProvider 返回 ZCode 账号的上游 provider（zai / bigmodel），默认 zai。
+func (a *Account) GetZcodeProvider() string {
+	if a == nil {
+		return ZcodeProviderZai
+	}
+	switch strings.TrimSpace(a.GetCredential("provider")) {
+	case ZcodeProviderBigmodel:
+		return ZcodeProviderBigmodel
+	default:
+		return ZcodeProviderZai
+	}
+}
+
+// GetZcodePlan 返回 ZCode 账号的接入计划（coding-plan / start-plan），默认 coding-plan。
+func (a *Account) GetZcodePlan() string {
+	if a == nil {
+		return ZcodePlanCoding
+	}
+	switch strings.TrimSpace(a.GetCredential("plan")) {
+	case ZcodePlanStart:
+		return ZcodePlanStart
+	default:
+		return ZcodePlanCoding
+	}
+}
+
+// GetZcodeJWT 返回 ZCode OAuth 登录捕获的 zcode.z.ai plan JWT（start-plan 网关与
+// 账单额度端点使用；coding-plan 也可携带以查询额度）。
+func (a *Account) GetZcodeJWT() string {
+	if a == nil {
+		return ""
+	}
+	return strings.TrimSpace(a.GetCredential("jwt"))
+}
+
+// GetZcodeUserID 返回 ZCode OAuth 登录的上游用户标识（转发时随 metadata.user_id 注入）。
+func (a *Account) GetZcodeUserID() string {
+	if a == nil {
+		return ""
+	}
+	return strings.TrimSpace(a.GetCredential("user_id"))
+}
+
+// ZcodeCredentialString 返回 ZCode coding-plan 请求使用的凭据串：
+// zai 为 `{apiKey}.{secret}`（secret 缺省时仅 apiKey）；bigmodel 在解析阶段已
+// 合并为完整 Key，直接返回 apiKey。
+func (a *Account) ZcodeCredentialString() string {
+	if a == nil {
+		return ""
+	}
+	apiKey := strings.TrimSpace(a.GetCredential("api_key"))
+	secret := strings.TrimSpace(a.GetCredential("secret"))
+	if apiKey == "" {
+		return ""
+	}
+	if secret != "" {
+		return apiKey + "." + secret
+	}
+	return apiKey
+}
+
+// GetZcodeAnthropicBaseURL 返回 ZCode 账号的 Anthropic 上游 base URL
+// （不含 /v1/messages 路径段，由 nativeAnthropicTargetURL 统一拼接）。
+// start-plan 固定走 zcode.z.ai 网关（携带 JWT）；coding-plan 优先取凭证
+// base_url（自定义中转），缺失时按 provider 返回官方端点。
+func (a *Account) GetZcodeAnthropicBaseURL() string {
+	if a == nil {
+		return ""
+	}
+	if a.GetZcodePlan() == ZcodePlanStart {
+		return ZcodeStartPlanAnthropicBaseURL
+	}
+	if a.Type == AccountTypeAPIKey || a.Type == AccountTypeOAuth {
+		if baseURL := strings.TrimSpace(a.GetCredential("base_url")); baseURL != "" {
+			return baseURL
+		}
+	}
+	switch a.GetZcodeProvider() {
+	case ZcodeProviderBigmodel:
+		return DefaultZcodeBigmodelAnthropicBaseURL
+	default:
+		return DefaultZcodeZaiAnthropicBaseURL
+	}
+}
+
 // GetCodingPlanProvider 根据 base_url 识别 Coding Plan 供应商（kimi / zhipu / minimax），
 // 用于路由到对应的额度查询端点。非 coding 模式或无法识别时返回空串。
 // 只认官方域名：自定义中转不得把第三方 Key 发往厂商官方额度端点。
 func (a *Account) GetCodingPlanProvider() string {
 	if a == nil {
 		return ""
+	}
+	if a.IsZcode() {
+		return PlatformZcode
 	}
 	if a.IsOpenCodeGoPlan() {
 		return PlatformOpenCodeGo

@@ -88,6 +88,11 @@ const PROVIDER_ICONS: Record<Provider, IconData> = {
       'M16 6H8v12h8V6zm4 16H4V2h16v20z',
     ],
   },
+  zcode: {
+    paths: [
+      'M4 3h16v4.2L11.4 17H20v4H4v-4.2L12.6 7H4V3z',
+    ],
+  },
 }
 
 const props = withDefaults(defineProps<{

@@ -228,6 +228,19 @@
             <PlatformIcon platform="opencode_go" size="sm" />
             OpenCode
           </button>
+          <button
+            type="button"
+            @click="selectZcodePlatform()"
+            :class="[
+              'flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2.5 text-sm font-medium transition-all',
+              form.platform === 'zcode'
+                ? 'bg-white text-sky-600 shadow-sm dark:bg-dark-600 dark:text-sky-400'
+                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
+            ]"
+          >
+            <PlatformIcon platform="zcode" size="sm" />
+            ZCode
+          </button>
         </div>
       </div>
 
@@ -1359,7 +1372,88 @@
 
       <!-- API Key input (only for apikey type, excluding Antigravity which has its own fields) -->
       <div v-if="form.type === 'apikey' && form.platform !== 'antigravity'" class="space-y-4">
-        <div v-if="!isMultiProtocolPlatform || apiProtocol !== 'adaptive'">
+        <!-- ZCode：上游供应商 / 接入计划 / OAuth 登录（Z.AI 轮询或智谱粘贴回调） -->
+        <template v-if="form.platform === 'zcode'">
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              <label class="input-label">{{ t('admin.accounts.zcode.provider') }}</label>
+              <select v-model="zcodeProvider" class="input">
+                <option v-for="opt in ZCODE_PROVIDERS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+              </select>
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.accounts.zcode.plan') }}</label>
+              <select v-model="zcodePlan" class="input">
+                <option v-for="opt in ZCODE_PLANS" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+              </select>
+              <p class="input-hint">{{ t('admin.accounts.zcode.planHint') }}</p>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-gray-200 p-4 dark:border-dark-600">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <label class="input-label mb-0">{{ t('admin.accounts.zcode.oauth.title') }}</label>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {{ t('admin.accounts.zcode.oauth.desc') }}
+                </p>
+              </div>
+              <button
+                type="button"
+                class="btn-secondary shrink-0"
+                :disabled="zcodeOAuthBusy"
+                @click="startZcodeOAuth"
+              >
+                {{ zcodeOAuthBusy ? t('admin.accounts.zcode.oauth.running') : t('admin.accounts.zcode.oauth.start') }}
+              </button>
+            </div>
+
+            <template v-if="zcodeOAuthAuthorizeUrl">
+              <p class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                <a :href="zcodeOAuthAuthorizeUrl" target="_blank" rel="noopener" class="text-primary-600 underline dark:text-primary-400">
+                  {{ t('admin.accounts.zcode.oauth.openLink') }}
+                </a>
+              </p>
+            </template>
+
+            <template v-if="zcodeOAuthMode === 'paste' && zcodeOAuthSessionId">
+              <label class="input-label mt-3">{{ t('admin.accounts.zcode.oauth.pasteLabel') }}</label>
+              <textarea
+                v-model="zcodePastedUrl"
+                rows="2"
+                class="input font-mono text-xs"
+                :placeholder="t('admin.accounts.zcode.oauth.pastePlaceholder')"
+              />
+              <button type="button" class="btn-secondary mt-2" :disabled="zcodeOAuthBusy || !zcodePastedUrl.trim()" @click="completeZcodePaste">
+                {{ t('admin.accounts.zcode.oauth.complete') }}
+              </button>
+            </template>
+
+            <p v-if="zcodeOAuthStatusMessage" class="input-hint mt-2">{{ zcodeOAuthStatusMessage }}</p>
+
+            <template v-if="zcodeJwt.trim()">
+              <div class="mt-3 flex items-center gap-2 rounded-md bg-green-50 px-3 py-2 text-xs text-green-700 dark:bg-green-900/20 dark:text-green-300">
+                <span>{{ t('admin.accounts.zcode.oauth.success') }}</span>
+              </div>
+            </template>
+          </div>
+
+          <div>
+            <label class="input-label">{{ t('admin.accounts.apiKeyRequired') }}</label>
+            <input
+              v-model="apiKeyValue"
+              type="password"
+              class="input font-mono"
+              :placeholder="zcodePlan === 'start-plan' ? t('admin.accounts.zcode.apiKeyOptional') : '<api-key>.<secret>'"
+            />
+            <p class="input-hint">{{ t('admin.accounts.zcode.apiKeyHint') }}</p>
+          </div>
+          <div v-if="zcodeProvider === 'zai' && zcodePlan === 'coding-plan'">
+            <label class="input-label">{{ t('admin.accounts.zcode.secret') }}</label>
+            <input v-model="zcodeSecret" type="password" class="input font-mono" placeholder="secret" />
+          </div>
+        </template>
+        <div v-if="(!isMultiProtocolPlatform || apiProtocol !== 'adaptive') && !(form.platform === 'zcode' && zcodePlan === 'start-plan')">
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
             v-model="apiKeyBaseUrl"
@@ -1407,7 +1501,7 @@
           v-model:rows="openCodeGoProtocolRules"
           :plan="openCodeAccountMode"
         />
-        <div>
+        <div v-if="form.platform !== 'zcode'">
           <label class="input-label">{{ t('admin.accounts.apiKeyRequired') }}</label>
           <input
             v-model="apiKeyValue"
@@ -3950,16 +4044,22 @@ import {
   defaultCNAdaptiveBaseUrls,
   defaultCNBaseUrl,
   defaultOpenCodeProtocolRules,
+  buildZcodeCredentials,
+  defaultZcodeBaseUrl,
   isCNProviderPlatform,
   isHeaderOverrideCapable,
   validateHeaderOverrideRows,
+  ZCODE_PLANS,
+  ZCODE_PROVIDERS,
   type CnAccountMode,
   type CnApiProtocol,
   type CnNativeApiProtocol,
   type CnProviderPlatform,
   type HeaderOverrideRow,
   type OpenCodeAccountMode,
-  type OpenCodeGoProtocolRule
+  type OpenCodeGoProtocolRule,
+  type ZcodePlan,
+  type ZcodeProvider
 } from '@/components/account/credentialsBuilder'
 import {
   formatDateTimeLocalInput,
@@ -4270,6 +4370,149 @@ function selectOpenCodeGoPlatform() {
   apiKeyBaseUrl.value = defaultCNBaseUrl('opencode_go', openCodeAccountMode.value, 'adaptive')
   resetAdaptiveBaseUrls('opencode_go', openCodeAccountMode.value)
   openCodeGoProtocolRules.value = cloneOpenCodeGoProtocolRules(defaultOpenCodeProtocolRules(openCodeAccountMode.value))
+}
+
+// ===== ZCode 平台（Z.AI / 智谱 GLM Coding Plan，经 ZCode 客户端身份接入） =====
+const zcodeProvider = ref<ZcodeProvider>('zai')
+const zcodePlan = ref<ZcodePlan>('coding-plan')
+const zcodeSecret = ref('')
+const zcodeJwt = ref('')
+const zcodeUserId = ref('')
+const zcodeOAuthSessionId = ref('')
+const zcodeOAuthMode = ref<'poll' | 'paste' | ''>('')
+const zcodeOAuthAuthorizeUrl = ref('')
+const zcodeOAuthBusy = ref(false)
+const zcodeOAuthStatusMessage = ref('')
+const zcodePastedUrl = ref('')
+let zcodePollTimer: ReturnType<typeof setTimeout> | null = null
+
+function stopZcodePolling() {
+  if (zcodePollTimer) {
+    clearTimeout(zcodePollTimer)
+    zcodePollTimer = null
+  }
+}
+
+function resetZcodeOAuthState() {
+  stopZcodePolling()
+  zcodeOAuthSessionId.value = ''
+  zcodeOAuthMode.value = ''
+  zcodeOAuthAuthorizeUrl.value = ''
+  zcodeOAuthStatusMessage.value = ''
+  zcodePastedUrl.value = ''
+  zcodeOAuthBusy.value = false
+}
+
+function selectZcodePlatform() {
+  form.platform = 'zcode'
+  form.type = 'apikey'
+  accountCategory.value = 'apikey'
+  resetZcodeOAuthState()
+  zcodeProvider.value = 'zai'
+  zcodePlan.value = 'coding-plan'
+  zcodeSecret.value = ''
+  zcodeJwt.value = ''
+  zcodeUserId.value = ''
+  apiKeyBaseUrl.value = defaultZcodeBaseUrl('zai', 'coding-plan')
+}
+
+function syncZcodeBaseUrl() {
+  if (form.platform !== 'zcode') return
+  const next = defaultZcodeBaseUrl(zcodeProvider.value, zcodePlan.value)
+  apiKeyBaseUrl.value = next
+}
+
+watch(zcodeProvider, syncZcodeBaseUrl)
+watch(zcodePlan, syncZcodeBaseUrl)
+
+function applyZcodeOAuthCredentials(credentials: Record<string, unknown>) {
+  if (typeof credentials.api_key === 'string' && credentials.api_key.trim()) {
+    apiKeyValue.value = credentials.api_key.trim()
+  }
+  if (typeof credentials.secret === 'string' && credentials.secret.trim()) {
+    zcodeSecret.value = credentials.secret.trim()
+  }
+  if (typeof credentials.jwt === 'string' && credentials.jwt.trim()) {
+    zcodeJwt.value = credentials.jwt.trim()
+  }
+  if (typeof credentials.user_id === 'string' && credentials.user_id.trim()) {
+    zcodeUserId.value = credentials.user_id.trim()
+  }
+  if (credentials.provider === 'zai' || credentials.provider === 'bigmodel') {
+    zcodeProvider.value = credentials.provider
+  }
+}
+
+function errorMessage(err: unknown): string {
+  const e = err as { response?: { data?: { message?: string; detail?: string } }; message?: string }
+  return e?.response?.data?.message || e?.response?.data?.detail || e?.message || String(err)
+}
+
+async function startZcodeOAuth() {
+  resetZcodeOAuthState()
+  zcodeOAuthBusy.value = true
+  try {
+    const result = await adminAPI.zcode.startLogin(zcodeProvider.value, form.proxy_id)
+    zcodeOAuthSessionId.value = result.session_id
+    zcodeOAuthMode.value = result.mode
+    zcodeOAuthAuthorizeUrl.value = result.auth_url
+    zcodeOAuthStatusMessage.value =
+      result.mode === 'poll'
+        ? t('admin.accounts.zcode.oauth.waitingPoll')
+        : t('admin.accounts.zcode.oauth.waitingPaste')
+    if (result.mode === 'poll') {
+      scheduleZcodePoll(result.session_id)
+    }
+  } catch (err) {
+    zcodeOAuthStatusMessage.value = errorMessage(err)
+  } finally {
+    zcodeOAuthBusy.value = false
+  }
+}
+
+function scheduleZcodePoll(sessionId: string) {
+  stopZcodePolling()
+  zcodePollTimer = setTimeout(async () => {
+    if (zcodeOAuthSessionId.value !== sessionId) return
+    try {
+      const status = await adminAPI.zcode.pollLogin(sessionId)
+      if (status.status === 'ready' && status.credentials) {
+        applyZcodeOAuthCredentials(status.credentials)
+        zcodeOAuthStatusMessage.value = t('admin.accounts.zcode.oauth.success')
+        zcodeOAuthSessionId.value = ''
+        return
+      }
+      if (status.status === 'failed') {
+        zcodeOAuthStatusMessage.value = status.message || t('admin.accounts.zcode.oauth.failed')
+        zcodeOAuthSessionId.value = ''
+        return
+      }
+      scheduleZcodePoll(sessionId)
+    } catch (err) {
+      // 单次轮询失败（网络抖动/会话过期）：展示错误并停止轮询，允许重试。
+      zcodeOAuthStatusMessage.value = errorMessage(err)
+      zcodeOAuthSessionId.value = ''
+    }
+  }, 3000)
+}
+
+async function completeZcodePaste() {
+  if (!zcodeOAuthSessionId.value || !zcodePastedUrl.value.trim()) return
+  zcodeOAuthBusy.value = true
+  try {
+    const status = await adminAPI.zcode.completeCallback(zcodeOAuthSessionId.value, zcodePastedUrl.value.trim())
+    if (status.status === 'ready' && status.credentials) {
+      applyZcodeOAuthCredentials(status.credentials)
+      zcodeOAuthStatusMessage.value = t('admin.accounts.zcode.oauth.success')
+      zcodeOAuthSessionId.value = ''
+    } else {
+      zcodeOAuthStatusMessage.value = status.message || t('admin.accounts.zcode.oauth.failed')
+    }
+  } catch (err) {
+    zcodeOAuthStatusMessage.value = errorMessage(err)
+  } finally {
+    zcodeOAuthBusy.value = false
+  }
 }
 // 账号类型 / 协议变更时同步默认 base url。
 watch(openCodeAccountMode, (mode, previousMode) => {
@@ -5314,6 +5557,13 @@ const resetForm = () => {
   adaptiveBaseUrls.value = { chat_completions: '', anthropic: '', responses: '' }
   apiKeyBaseUrl.value = 'https://api.anthropic.com'
   apiKeyValue.value = ''
+  stopZcodePolling()
+  zcodeProvider.value = 'zai'
+  zcodePlan.value = 'coding-plan'
+  zcodeSecret.value = ''
+  zcodeJwt.value = ''
+  zcodeUserId.value = ''
+  resetZcodeOAuthState()
   upstreamRequestIdHeader.value = ''
   upstreamBillingAutoProbeEnabled.value = true
   editQuotaLimit.value = null
@@ -5758,7 +6008,18 @@ const handleSubmit = async () => {
   }
 
   // For apikey type, create directly
-  if (!apiKeyValue.value.trim()) {
+  if (form.platform === 'zcode') {
+    // ZCode：start-plan 仅持 plan JWT（OAuth 登录捕获），coding-plan 需要 API Key。
+    if (zcodePlan.value === 'start-plan') {
+      if (!zcodeJwt.value.trim()) {
+        appStore.showError(t('admin.accounts.zcode.jwtRequired'))
+        return
+      }
+    } else if (!apiKeyValue.value.trim()) {
+      appStore.showError(t('admin.accounts.pleaseEnterApiKey'))
+      return
+    }
+  } else if (!apiKeyValue.value.trim()) {
     appStore.showError(t('admin.accounts.pleaseEnterApiKey'))
     return
   }
@@ -5780,6 +6041,27 @@ const handleSubmit = async () => {
   }
   if (form.platform === 'gemini') {
     credentials.tier_id = geminiTierAIStudio.value
+  }
+
+  // ZCode：provider/plan/OAuth 凭据（jwt/user_id/secret）写入凭据；
+  // api_protocol 固定 anthropic（上游仅 Anthropic 兼容端点），start-plan 忽略 base_url。
+  if (form.platform === 'zcode') {
+    const zcodeBase = apiKeyBaseUrl.value.trim() || defaultZcodeBaseUrl(zcodeProvider.value, zcodePlan.value)
+    const built = buildZcodeCredentials({
+      provider: zcodeProvider.value,
+      plan: zcodePlan.value,
+      apiKey: apiKeyValue.value,
+      secret: zcodeSecret.value,
+      jwt: zcodeJwt.value,
+      userId: zcodeUserId.value,
+      baseUrl: zcodeBase
+    })
+    if (zcodeBase) {
+      credentials.base_url = zcodeBase
+    } else {
+      delete credentials.base_url
+    }
+    Object.assign(credentials, built)
   }
 
   // 国产供应商：账号模式 + 协议 + 对应端点写入凭据；后端按 account_mode 路由

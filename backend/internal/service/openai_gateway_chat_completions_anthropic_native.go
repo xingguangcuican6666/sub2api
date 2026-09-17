@@ -97,7 +97,9 @@ func (s *OpenAIGatewayService) forwardChatCompletionsViaNativeAnthropic(
 	anthropicBody = enforceCacheControlLimit(anthropicBody)
 
 	apiKey := strings.TrimSpace(account.GetOpenAIProtocolAPIKey())
-	if apiKey == "" {
+	// ZCode start-plan 账号仅持 plan JWT（无 api_key），凭证校验延迟到
+	// ApplyZcodeUpstreamHeaders 内做。
+	if apiKey == "" && !account.IsZcode() {
 		return nil, fmt.Errorf("account %d missing api_key", account.ID)
 	}
 	targetURL, err := s.nativeAnthropicTargetURL(account)

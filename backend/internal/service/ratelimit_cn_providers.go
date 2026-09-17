@@ -130,7 +130,7 @@ func cnProviderQuotaSnapshotReset(account *Account, now time.Time) *time.Time {
 	if account == nil || len(account.Extra) == 0 {
 		return nil
 	}
-	if !account.IsOpenCodeGo() && (!account.IsCNProvider() || !account.IsCodingPlan()) {
+	if !account.IsOpenCodeGo() && !account.IsZcode() && (!account.IsCNProvider() || !account.IsCodingPlan()) {
 		return nil
 	}
 	provider := account.Platform
@@ -189,11 +189,11 @@ func (s *RateLimitService) applyCNProviderReactive429(
 		}
 		return false
 	}
-	if !account.IsCNProvider() {
+	if !account.IsCNProvider() && !account.IsZcode() {
 		return false
 	}
 	// 1) 余额不足文案：可恢复临时停调（含智谱 payg 这类无余额端点的场景）。
-	if cnProviderResponseIndicatesInsufficientBalance(responseBody) {
+	if account.IsCNProvider() && cnProviderResponseIndicatesInsufficientBalance(responseBody) {
 		s.handleCNProviderInsufficientBalance(ctx, account, extractUpstreamErrorMessage(responseBody))
 		return true
 	}

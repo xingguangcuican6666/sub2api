@@ -1167,7 +1167,7 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 	}
 	// 国产供应商（kimi/zhipu/deepseek）的 429 走专用可恢复路径：余额不足 → 临时停调，
 	// Coding Plan 窗口耗尽 → 冷却到快照重置点。未命中则继续默认 429 逻辑。
-	if account.IsCNProvider() || account.IsOpenCodeGo() {
+	if account.IsCNProvider() || account.IsOpenCodeGo() || account.IsZcode() {
 		if s.applyCNProviderReactive429(ctx, account, headers, responseBody) {
 			return
 		}

@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -131,11 +132,16 @@ func (s *CNProviderQuotaService) QueryUsageForAccount(ctx context.Context, accou
 
 func (s *CNProviderQuotaService) queryUsageForAccount(ctx context.Context, account *Account) (*CNProviderQuotaProbeResult, error) {
 	provider := account.GetCodingPlanProvider()
-	if provider != PlatformKimi && provider != PlatformZhipu && provider != PlatformMiniMax && provider != PlatformOpenCodeGo {
-		return nil, infraerrors.New(http.StatusBadRequest, "CN_QUOTA_NOT_CODING_PLAN", "account is not a kimi/zhipu/minimax coding plan or opencode go account")
+	if provider != PlatformKimi && provider != PlatformZhipu && provider != PlatformMiniMax && provider != PlatformOpenCodeGo && provider != PlatformZcode {
+		return nil, infraerrors.New(http.StatusBadRequest, "CN_QUOTA_NOT_CODING_PLAN", "account is not a kimi/zhipu/minimax coding plan, opencode go or zcode account")
 	}
 
 	apiKey := strings.TrimSpace(account.GetCNAPIKey())
+	if provider == PlatformZcode {
+		// ZCode 账单端点以 OAuth plan JWT 鉴权（coding-plan 无 JWT 时降级 api_key 探测不可行，
+		// 直接要求重新 OAuth 登录）。
+		apiKey = account.GetZcodeJWT()
+	}
 	if apiKey == "" {
 		return nil, infraerrors.New(http.StatusBadRequest, "CN_QUOTA_NO_APIKEY", "account api_key is empty")
 	}
@@ -166,6 +172,9 @@ func (s *CNProviderQuotaService) queryUsageForAccount(ctx context.Context, accou
 	case PlatformMiniMax:
 		targetURL = minimaxQuotaURL(baseURL)
 		authHeader = "Bearer " + apiKey
+	case PlatformZcode:
+		targetURL = zcodeBillingQuotaURL(account)
+		authHeader = "Bearer " + apiKey
 	}
 
 	// 探测发起前过出站 URL 安全策略（与网关转发/Grok 探测同一套校验）：
@@ -193,6 +202,16 @@ func (s *CNProviderQuotaService) queryUsageForAccount(ctx context.Context, accou
 			if project := strings.TrimSpace(account.GetCredential("zhipu_project")); project != "" {
 				req.Header.Set("bigmodel-project", project)
 			}
+		}
+	}
+	if provider == PlatformZcode {
+		// zcode.z.ai 账单网关要求 ZCode 桌面端身份指纹（含稳定 X-Device-Mid）；
+		// 与官方客户端一致：账单面不带 X-ZCode-Agent。
+		for key, value := range BuildZcodeControlPlaneIdentityHeaders(account) {
+			if key == "X-ZCode-Agent" {
+				continue
+			}
+			req.Header.Set(key, value)
 		}
 	}
 	// 探测与真实转发保持同一套账号级请求头覆写，避免探测通过但转发失败。
@@ -245,6 +264,17 @@ func (s *CNProviderQuotaService) queryUsageForAccount(ctx context.Context, accou
 	case PlatformZhipu:
 		tiers = parseZhipuTokenTiers(gjson.GetBytes(bodyBytes, "data"))
 		result.PlanLevel = strings.TrimSpace(gjson.GetBytes(bodyBytes, "data.level").String())
+	case PlatformZcode:
+		var bizErr error
+		tiers, bizErr = parseZcodeBillingTiers(bodyBytes)
+		if bizErr != nil {
+			result.Error = "API error: " + bizErr.Error()
+			return result, nil
+		}
+		result.PlanLevel = strings.TrimSpace(gjson.GetBytes(bodyBytes, "data.plan_name").String())
+		if result.PlanLevel == "" {
+			result.PlanLevel = "ZCode Coding Plan"
+		}
 	case PlatformMiniMax:
 		if status := gjson.GetBytes(bodyBytes, "base_resp.status_code"); status.Exists() && status.Int() != 0 {
 			msg := strings.TrimSpace(gjson.GetBytes(bodyBytes, "base_resp.status_msg").String())
@@ -261,7 +291,11 @@ func (s *CNProviderQuotaService) queryUsageForAccount(ctx context.Context, accou
 	result.Success = true
 	result.CredentialValid = true
 
-	updates := cnQuotaExtraUpdates(provider, tiers, now)
+	quotaTiers := tiers
+	if provider == PlatformZcode {
+		quotaTiers = zcodeMachineQuotaTiers(tiers)
+	}
+	updates := cnQuotaExtraUpdates(provider, quotaTiers, now)
 	if err := s.accountRepo.UpdateExtra(ctx, account.ID, updates); err != nil {
 		slog.Warn("cn_quota_persist_failed", "account_id", account.ID, "provider", provider, "error", err)
 	} else {
@@ -292,6 +326,10 @@ func validateCodingPlanAccount(account *Account) error {
 	}
 	if account.IsOpenCodeGo() {
 		return infraerrors.New(http.StatusBadRequest, "CN_QUOTA_NOT_CODING_PLAN", "opencode zen accounts have no subscription quota window")
+	}
+	if account.IsZcode() {
+		// ZCode 账单端点凭 JWT 鉴权，api_key 是否存在由查询阶段按 plan 校验。
+		return nil
 	}
 	if !account.IsCNProvider() {
 		return infraerrors.New(http.StatusBadRequest, "CN_QUOTA_INVALID_PLATFORM", "account is not a CN provider account")
@@ -746,4 +784,87 @@ func cnMillisToRFC3339(n int64) string {
 		ms = n
 	}
 	return time.UnixMilli(ms).UTC().Format(time.RFC3339)
+}
+
+// zcodeBillingQuotaURL 构造 ZCode 账单额度端点（zcode.z.ai 控制面）。
+// 请求需携带 OAuth plan JWT 与 ZCode 桌面端身份指纹（见请求头注入处）。
+func zcodeBillingQuotaURL(account *Account) string {
+	appVersion := ZcodeAppVersionDefault
+	if account != nil {
+		if v := strings.TrimSpace(account.GetCredential("identity_app_version")); v != "" {
+			appVersion = v
+		}
+	}
+	return ZcodeBillingBalanceURL + "?app_version=" + url.QueryEscape(appVersion) + "&platform=linux-x64"
+}
+
+// parseZcodeBillingTiers 解析 ZCode 账单余额响应：
+//
+//	{ "code": 0, "data": { "balances": [ { "show_name": ..., "used_units": ...,
+//	  "total_units": ..., "remaining_units": ..., "expires_at": unix 秒 } ] } }
+//
+// 每个余额桶映射为一个展示档位：Window 使用服务端 show_name（保留原始文案），
+// UsedPercent = used/total*100（total 缺失时跳过该桶），ResetAt 取 expires_at。
+func parseZcodeBillingTiers(body []byte) ([]CNQuotaTier, error) {
+	if code := gjson.GetBytes(body, "code"); code.Exists() && code.Int() != 0 {
+		msg := strings.TrimSpace(gjson.GetBytes(body, "msg").String())
+		if msg == "" {
+			msg = "unknown zcode billing error"
+		}
+		return nil, fmt.Errorf("%s (code %d)", msg, code.Int())
+	}
+	balances := gjson.GetBytes(body, "data.balances")
+	if !balances.Exists() || !balances.IsArray() {
+		return nil, nil
+	}
+	var tiers []CNQuotaTier
+	for _, item := range balances.Array() {
+		total := item.Get("total_units").Float()
+		if total <= 0 {
+			total = item.Get("totalUnits").Float()
+		}
+		if total <= 0 {
+			continue
+		}
+		used := item.Get("used_units").Float()
+		if used <= 0 {
+			used = item.Get("usedUnits").Float()
+		}
+		window := strings.TrimSpace(item.Get("show_name").String())
+		if window == "" {
+			window = "quota"
+		}
+		tier := CNQuotaTier{
+			Window:      window,
+			UsedPercent: used / total * 100,
+		}
+		if expiresAt := item.Get("expires_at").Int(); expiresAt > 0 {
+			tier.ResetAt = time.Unix(expiresAt, 0).UTC().Format(time.RFC3339)
+		}
+		tiers = append(tiers, tier)
+	}
+	return tiers, nil
+}
+
+// zcodeMachineQuotaTiers 把 ZCode 展示档位映射到阈值评估使用的机器窗口键
+// （5h / weekly）：按已用百分比降序，最紧的桶落 5h 键、次紧落 weekly 键。
+// 展示层（CNProviderQuotaProbeResult.Tiers）保持服务端原始 show_name，
+// 仅 Extra 快照使用机器键，与 cnProviderThresholdCandidates 的读取约定对齐。
+func zcodeMachineQuotaTiers(tiers []CNQuotaTier) []CNQuotaTier {
+	sorted := make([]CNQuotaTier, len(tiers))
+	copy(sorted, tiers)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].UsedPercent > sorted[j].UsedPercent
+	})
+	machine := make([]CNQuotaTier, 0, 2)
+	for _, window := range []string{"5h", "weekly"} {
+		if len(sorted) == 0 {
+			break
+		}
+		next := sorted[0]
+		sorted = sorted[1:]
+		next.Window = window
+		machine = append(machine, next)
+	}
+	return machine
 }
