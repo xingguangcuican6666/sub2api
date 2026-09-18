@@ -113,6 +113,7 @@ LABEL description="Sub2API - AI API Gateway Platform"
 LABEL org.opencontainers.image.source="https://github.com/Wei-Shaw/sub2api"
 
 # Install runtime dependencies
+# chromium: zcode 试用套餐（Start Plan 等）的阿里云验证码无痕求解所需（go-rod 驱动）
 RUN apk add --no-cache \
     ca-certificates \
     tzdata \
@@ -123,6 +124,7 @@ RUN apk add --no-cache \
     krb5-libs \
     libldap \
     libedit \
+    chromium \
     && rm -rf /var/cache/apk/*
 
 # Copy pg_dump and psql from the same postgres image used in docker-compose

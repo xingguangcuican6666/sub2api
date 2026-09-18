@@ -102,11 +102,27 @@ func (s *OpenAIGatewayService) forwardAnthropicViaNativeAnthropicEndpoint(
 		return nil, err
 	}
 
+	// ZCode 试用套餐：zcode.z.ai 网关要求每个请求携带阿里云验证码 token
+	// （Coding Plan 直连 api.z.ai 免）。求解器不可用时请求照发，由下方
+	// 的挑战重试/错误路径兜底。
+	if account.IsZcode() && IsZcodeTrialPlan(account.GetZcodePlan()) {
+		if tok, tokErr := zcodeCaptchaTokenFor(ctx); tokErr == nil {
+			setZcodeCaptchaHeaders(upstreamReq.Header, tok)
+		}
+	}
+
 	resp, err := s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 	}
 	defer func() { _ = resp.Body.Close() }()
+
+	// 上游 3007 = 验证码挑战（token 缺失/过期/被拒）：急速补解并整请求重试一次。
+	if account.IsZcode() && IsZcodeTrialPlan(account.GetZcodePlan()) && resp.StatusCode >= 400 {
+		if retried := s.retryZcodeNativeAnthropicChallenge(ctx, c, account, body, apiKey, targetURL, proxyURL, resp); retried != nil {
+			resp = retried
+		}
+	}
 
 	if resp.StatusCode >= 400 {
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
@@ -140,6 +156,40 @@ func (s *OpenAIGatewayService) nativeAnthropicTargetURL(account *Account) (strin
 		return buildOpenAIEndpointURL(validatedURL, "/v1/messages"), nil
 	}
 	return strings.TrimRight(validatedURL, "/") + "/v1/messages", nil
+}
+
+// retryZcodeNativeAnthropicChallenge 检测上游 3007 阿里云验证码挑战（响应头
+// x-aliyun-captcha-verify-param 或 body 内 code 3007），补解 token 并整请求
+// 重试一次。返回 nil 表示无需/无法重试（resp 的 body 已原样恢复，供调用方
+// 原有错误路径继续使用）。
+func (s *OpenAIGatewayService) retryZcodeNativeAnthropicChallenge(ctx context.Context, c *gin.Context, account *Account, body []byte, apiKey, targetURL, proxyURL string, resp *http.Response) *http.Response {
+	contentType := resp.Header.Get("Content-Type")
+	if strings.Contains(contentType, "text/event-stream") {
+		return nil
+	}
+	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
+	_ = resp.Body.Close()
+	resp.Body = io.NopCloser(bytes.NewReader(raw)) // 恢复给原错误路径
+	if readErr != nil || !zcodeCaptchaChallenge(resp.Header, raw) {
+		return nil
+	}
+
+	fresh, tokErr := zcodeCaptchaTokenFor(ctx)
+	if tokErr != nil {
+		logger.LegacyPrintf("service.gateway", "[CN Anthropic 直通] zcode 验证码挑战重试不可用: account=%d err=%v", account.ID, tokErr)
+		return nil
+	}
+	req2, _, err := s.buildNativeAnthropicUpstreamRequest(ctx, c, account, body, apiKey, targetURL)
+	if err != nil {
+		return nil
+	}
+	setZcodeCaptchaHeaders(req2.Header, fresh)
+	resp2, err := s.doOpenAIUpstream(req2, proxyURL, account)
+	if err != nil {
+		return nil
+	}
+	logger.LegacyPrintf("service.gateway", "[CN Anthropic 直通] zcode 验证码挑战已重试: account=%d status=%d", account.ID, resp2.StatusCode)
+	return resp2
 }
 
 func resolveOpenCodeGoMappedModel(account *Account, body []byte, defaultMappedModel string) string {

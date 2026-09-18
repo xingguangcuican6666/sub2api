@@ -267,45 +267,85 @@ func (s *AccountTestService) testCNProviderAnthropicConnection(c *gin.Context, a
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
-	if err != nil {
-		return s.sendErrorAndEnd(c, "Failed to create Anthropic test request")
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("anthropic-version", "2023-06-01")
-	if account.IsZcode() {
-		// ZCode：coding-plan 双认证头 + ZCode 桌面客户端身份指纹（不能带
-		// Claude Code 身份头，否则与官方客户端指纹不符）。
-		if err := ApplyZcodeUpstreamHeaders(req.Header, account); err != nil {
-			return s.sendErrorAndEnd(c, err.Error())
+	// ZCode 试用套餐：zcode.z.ai 网关要求阿里云验证码 token（Coding Plan 免）。
+	// 求解器不可用时请求照发，由下方的 3007 挑战兜底提示解释原因。
+	var captchaHint string
+	var captchaToken *zcodeCaptchaToken
+	if account.IsZcode() && IsZcodeTrialPlan(account.GetZcodePlan()) {
+		tok, tokErr := zcodeCaptchaTokenFor(ctx)
+		if tokErr != nil {
+			captchaHint = fmt.Sprintf(
+				"；上游风控要求阿里云验证码且求解器不可用（%s）——请在部署环境安装 Chromium"+
+					"（或设置 ZCODE_CAPTCHA_CHROME_BIN / 关闭 ZCODE_CAPTCHA_AUTO_DOWNLOAD），或改用 Coding Plan API Key",
+				tokErr.Error())
+		} else {
+			captchaToken = tok
 		}
-	} else {
-		for key, value := range claude.DefaultHeaders {
-			req.Header.Set(key, value)
-		}
-		// Ollama Cloud Anthropic 兼容端点按实际 base_url 强制 Bearer，其余保持
-		// extra/default 行为。
-		setAnthropicAPIKeyAuthHeader(req.Header, account, authToken, account.GetAnthropicProtocolBaseURL())
 	}
-	account.ApplyHeaderOverrides(req.Header)
-	applyOpenCodeSessionHeader(c, account, apiURL, req.Header, payloadBytes)
 
-	resp, err := s.doCNProviderAdaptiveRequest(req, account)
+	sendProbe := func(token *zcodeCaptchaToken) (*http.Response, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "text/event-stream")
+		req.Header.Set("anthropic-version", "2023-06-01")
+		if account.IsZcode() {
+			// ZCode：coding-plan 双认证头 + ZCode 桌面客户端身份指纹（不能带
+			// Claude Code 身份头，否则与官方客户端指纹不符）。
+			if err := ApplyZcodeUpstreamHeaders(req.Header, account); err != nil {
+				return nil, err
+			}
+			setZcodeCaptchaHeaders(req.Header, token)
+		} else {
+			for key, value := range claude.DefaultHeaders {
+				req.Header.Set(key, value)
+			}
+			// Ollama Cloud Anthropic 兼容端点按实际 base_url 强制 Bearer，其余保持
+			// extra/default 行为。
+			setAnthropicAPIKeyAuthHeader(req.Header, account, authToken, account.GetAnthropicProtocolBaseURL())
+		}
+		account.ApplyHeaderOverrides(req.Header)
+		applyOpenCodeSessionHeader(c, account, apiURL, req.Header, payloadBytes)
+		return s.doCNProviderAdaptiveRequest(req, account)
+	}
+
+	resp, err := sendProbe(captchaToken)
 	if err != nil {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Anthropic endpoint request failed: %s", err.Error()))
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		errMsg := fmt.Sprintf("Anthropic endpoint returned %d: %s", resp.StatusCode, string(body))
-		if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) && s.accountRepo != nil {
-			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
-		}
-		return s.sendErrorAndEnd(c, errMsg)
+	if resp.StatusCode == http.StatusOK {
+		defer func() { _ = resp.Body.Close() }()
+		return s.processClaudeStream(c, resp.Body)
 	}
 
-	return s.processClaudeStream(c, resp.Body)
+	// 非 200：读 body 做 3007 风控挑战判定；命中则补解一次并整请求重试。
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+	_ = resp.Body.Close()
+	challenged := account.IsZcode() && zcodeCaptchaChallenge(resp.Header, body)
+	if challenged {
+		if fresh, tokErr := zcodeCaptchaTokenFor(ctx); tokErr == nil {
+			if resp2, sendErr := sendProbe(fresh); sendErr == nil {
+				if resp2.StatusCode == http.StatusOK {
+					defer func() { _ = resp2.Body.Close() }()
+					return s.processClaudeStream(c, resp2.Body)
+				}
+				body2, _ := io.ReadAll(io.LimitReader(resp2.Body, 1024*1024))
+				_ = resp2.Body.Close()
+				resp.Header, body = resp2.Header, body2
+			}
+		}
+	}
+
+	errMsg := fmt.Sprintf("Anthropic endpoint returned %d: %s", resp.StatusCode, string(body))
+	if challenged {
+		errMsg = "上游风控要求阿里云验证码（zcode 试用套餐），自动求解后仍被拒绝 —— " + errMsg + captchaHint
+	}
+	if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) && s.accountRepo != nil {
+		_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+	}
+	return s.sendErrorAndEnd(c, errMsg)
 }
 
 // cnAnthropicBaseURLMisconfigHint reports an actionable error when an
