@@ -26,23 +26,33 @@ export interface ZcodeLoginStatus {
 
 export const zcodeApi = {
   /** 发起 OAuth 登录，返回授权 URL。 */
-  startLogin(provider: 'zai' | 'bigmodel', proxyId: number | null): Promise<ZcodeAuthURLResult> {
-    return apiClient.post('/admin/zcode/oauth/url', {
+  async startLogin(
+    provider: 'zai' | 'bigmodel',
+    proxyId: number | null
+  ): Promise<ZcodeAuthURLResult> {
+    // 拦截器已把 { code, message, data } 壳解成 data，这里必须再取一层
+    // response.data 才能拿到真正的业务字段（与 grok / cnProviders 同约定）。
+    const { data } = await apiClient.post<ZcodeAuthURLResult>('/admin/zcode/oauth/url', {
       provider,
       proxy_id: proxyId ?? null
     })
+    return data
   },
 
   /** 轮询 zai CLI 登录状态（前端以数秒间隔调用直到 ready / failed）。 */
-  pollLogin(sessionId: string): Promise<ZcodeLoginStatus> {
-    return apiClient.post('/admin/zcode/oauth/poll', { session_id: sessionId })
+  async pollLogin(sessionId: string): Promise<ZcodeLoginStatus> {
+    const { data } = await apiClient.post<ZcodeLoginStatus>('/admin/zcode/oauth/poll', {
+      session_id: sessionId
+    })
+    return data
   },
 
   /** bigmodel：用粘贴的回调 URL 完成 auth-code 换取。 */
-  completeCallback(sessionId: string, callbackUrl: string): Promise<ZcodeLoginStatus> {
-    return apiClient.post('/admin/zcode/oauth/callback', {
+  async completeCallback(sessionId: string, callbackUrl: string): Promise<ZcodeLoginStatus> {
+    const { data } = await apiClient.post<ZcodeLoginStatus>('/admin/zcode/oauth/callback', {
       session_id: sessionId,
       callback_url: callbackUrl
     })
+    return data
   }
 }
