@@ -672,26 +672,39 @@ func (s *ZcodeOAuthService) resolveCustomerInfo(ctx context.Context, client *htt
 func (s *ZcodeOAuthService) findOrCreateAPIKey(ctx context.Context, client *http.Client, host, authorization, orgID, projectID string) (string, error) {
 	listURL := fmt.Sprintf("%s/api/biz/v1/organization/%s/projects/%s/api_keys", host, url.PathEscape(orgID), url.PathEscape(projectID))
 
-	data, err := s.bizAPI(ctx, client, http.MethodGet, listURL, authorization, nil)
-	if err == nil {
-		if keys, ok := data["_list"].([]any); ok {
-			for _, rawKey := range keys {
-				key, ok := rawKey.(map[string]any)
-				if !ok {
-					continue
-				}
-				if name := zcodeStringField(key, "name"); name == ZcodeAPIKeyName {
-					if apiKey := zcodeStringField(key, "apiKey"); apiKey != "" {
-						return apiKey, nil
-					}
+	listExisting := func() (string, bool) {
+		data, err := s.bizAPI(ctx, client, http.MethodGet, listURL, authorization, nil)
+		if err != nil {
+			return "", false
+		}
+		keys, _ := data["_list"].([]any)
+		for _, rawKey := range keys {
+			key, ok := rawKey.(map[string]any)
+			if !ok {
+				continue
+			}
+			if name := zcodeStringField(key, "name"); name == ZcodeAPIKeyName {
+				if apiKey := zcodeStringField(key, "apiKey"); apiKey != "" {
+					return apiKey, true
 				}
 			}
 		}
+		return "", false
+	}
+
+	if apiKey, ok := listExisting(); ok {
+		return apiKey, nil
 	}
 	// 列表失败视为可创建（resolver.ts 同语义：ignore — will create）。
 
 	created, err := s.bizAPI(ctx, client, http.MethodPost, listURL, authorization, map[string]any{"name": ZcodeAPIKeyName})
 	if err != nil {
+		// 创建撞 500 duplicate 说明同名 Key 已存在，多半是列表未命中
+		// （瞬时失败或响应形状漂移）。重试一次列表，拿到即复用；否则
+		// 原样返回创建错误。
+		if apiKey, ok := listExisting(); ok {
+			return apiKey, nil
+		}
 		return "", err
 	}
 	apiKey := zcodeStringField(created, "apiKey")
@@ -713,7 +726,8 @@ func (s *ZcodeOAuthService) getSecretKey(ctx context.Context, client *http.Clien
 }
 
 // bizAPI 调用厂商 biz API 并解包（code 为 0/200/“0”/“200” 视为成功，返回 data 层）。
-// 列表端点返回顶层数组，这里包成 {"_list": [...]} 统一处理。
+// 列表形状（顶层数组，或 {"code":0,"data":[...]} 中 data 为数组）包成
+// {"_list": [...]} 统一处理。
 func (s *ZcodeOAuthService) bizAPI(ctx context.Context, client *http.Client, method, target, authorization string, body map[string]any) (map[string]any, error) {
 	var payload io.Reader
 	if body != nil {
@@ -776,6 +790,11 @@ func (s *ZcodeOAuthService) bizAPI(ctx context.Context, client *http.Client, met
 	}
 	if data, ok := obj["data"].(map[string]any); ok {
 		return data, nil
+	}
+	if list, ok := obj["data"].([]any); ok {
+		// data 为数组的壳（{"code":0,"data":[...]}，列表端点的实际形状）与
+		// 顶层数组一样包成 _list 统一处理。
+		return map[string]any{"_list": list}, nil
 	}
 	return obj, nil
 }
