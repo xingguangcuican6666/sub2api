@@ -256,6 +256,14 @@ func (s *AccountTestService) testCNProviderAnthropicConnection(c *gin.Context, a
 		return s.sendErrorAndEnd(c, "Failed to create Anthropic test payload")
 	}
 	payloadBytes, _ := json.Marshal(payload)
+	if account.IsZcode() {
+		// 与真实转发路径（forwardAnthropicViaNativeAnthropicEndpoint）一致：
+		// 注入官方客户端等价的 body 变换（metadata.user_id 设备/会话 blob +
+		// cache_control 标记）。探针默认的 Claude Code 风格 user_id 与请求上
+		// 的 ZCode 身份指纹互相矛盾，zcode.z.ai 网关风控会以
+		// 400 {"code":3007,"msg":"captcha verify failed"} 拒绝。
+		payloadBytes = ApplyZcodeBodyTransform(payloadBytes, account)
+	}
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
 
