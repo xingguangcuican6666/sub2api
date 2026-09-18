@@ -9,6 +9,7 @@ import { apiClient } from '../client'
 export interface ZcodeAuthURLResult {
   /** "poll"（zai 服务端中转）或 "paste"（bigmodel 粘贴回调）。 */
   mode: 'poll' | 'paste'
+  provider: 'zai' | 'bigmodel'
   auth_url: string
   session_id: string
   redirect_uri?: string

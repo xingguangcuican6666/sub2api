@@ -225,10 +225,23 @@ func truncateZcodeBody(raw []byte) string {
 // ZcodeAuthURLResult 是 StartLogin 的返回结构。
 type ZcodeAuthURLResult struct {
 	Mode        string `json:"mode"` // "poll"（zai）或 "paste"（bigmodel）
+	Provider    string `json:"provider"`
 	AuthURL     string `json:"auth_url"`
 	SessionID   string `json:"session_id"`
 	RedirectURI string `json:"redirect_uri,omitempty"` // paste 模式：回调地址提示
 	ExpiresAt   int64  `json:"expires_at,omitempty"`   // poll 模式：flow 过期时间（unix 秒）
+}
+
+func zcodeAbsoluteAuthURL(rawURL string) (string, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", fmt.Errorf("invalid authorization URL: expected an absolute http(s) URL")
+	}
+	if parsed.Scheme != "https" && parsed.Scheme != "http" {
+		return "", fmt.Errorf("invalid authorization URL scheme: %s", parsed.Scheme)
+	}
+	return parsed.String(), nil
 }
 
 // StartLogin 发起 ZCode OAuth 登录，返回授权 URL。
@@ -268,6 +281,10 @@ func (s *ZcodeOAuthService) StartLogin(ctx context.Context, provider string, pro
 		if err := json.Unmarshal(envelope.Data, &data); err != nil || data.FlowID == "" || data.AuthorizeURL == "" {
 			return nil, fmt.Errorf("Z.AI login init: invalid response data")
 		}
+		authorizeURL, err := zcodeAbsoluteAuthURL(data.AuthorizeURL)
+		if err != nil {
+			return nil, fmt.Errorf("Z.AI login init: %w", err)
+		}
 		s.sessionStore.Set(sessionID, &ZcodeOAuthSession{
 			Provider:  ZcodeProviderZai,
 			FlowID:    data.FlowID,
@@ -277,7 +294,8 @@ func (s *ZcodeOAuthService) StartLogin(ctx context.Context, provider string, pro
 		})
 		return &ZcodeAuthURLResult{
 			Mode:      "poll",
-			AuthURL:   data.AuthorizeURL,
+			Provider:  ZcodeProviderZai,
+			AuthURL:   authorizeURL,
 			SessionID: sessionID,
 			ExpiresAt: data.ExpiresAt,
 		}, nil
@@ -301,6 +319,7 @@ func (s *ZcodeOAuthService) StartLogin(ctx context.Context, provider string, pro
 		})
 		return &ZcodeAuthURLResult{
 			Mode:        "paste",
+			Provider:    ZcodeProviderBigmodel,
 			AuthURL:     authorizeURL,
 			SessionID:   sessionID,
 			RedirectURI: zcodeOAuthCallbackHost,
@@ -541,7 +560,7 @@ func (s *ZcodeOAuthService) ResolveCodingPlanCredential(ctx context.Context, pro
 // zaiBizToken 用 OAuth access_token 换 Z.AI 业务 token。
 func (s *ZcodeOAuthService) zaiBizToken(ctx context.Context, client *http.Client, accessToken string) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ZcodeZaiLoginURL,
-		bytes.NewReader([]byte(`{"token":"` + jsonStringEscape(accessToken) + `"}`)))
+		bytes.NewReader([]byte(`{"token":"`+jsonStringEscape(accessToken)+`"}`)))
 	if err != nil {
 		return "", err
 	}
@@ -556,9 +575,9 @@ func (s *ZcodeOAuthService) zaiBizToken(ctx context.Context, client *http.Client
 		return "", fmt.Errorf("z/login failed: status=%d", resp.StatusCode)
 	}
 	var data struct {
-		AccessToken string `json:"access_token"`
+		AccessToken      string `json:"access_token"`
 		AccessTokenCamel string `json:"accessToken"`
-		Data        struct {
+		Data             struct {
 			AccessToken string `json:"access_token"`
 		} `json:"data"`
 	}

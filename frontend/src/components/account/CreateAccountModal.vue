@@ -4423,7 +4423,10 @@ function syncZcodeBaseUrl() {
   apiKeyBaseUrl.value = next
 }
 
-watch(zcodeProvider, syncZcodeBaseUrl)
+watch(zcodeProvider, () => {
+  syncZcodeBaseUrl()
+  resetZcodeOAuthState()
+})
 watch(zcodePlan, syncZcodeBaseUrl)
 
 function applyZcodeOAuthCredentials(credentials: Record<string, unknown>) {
