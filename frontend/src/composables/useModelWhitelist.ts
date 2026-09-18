@@ -103,6 +103,16 @@ const zhipuModels = [
   'cogview-3', 'cogvideo'
 ]
 
+// ZCode（GLM Coding Plan，z.ai / 智谱）—— 与后端 DefaultZcodeModelIDs() 保持一致
+const zcodeModels = [
+  'glm-4.5-air',
+  'glm-4.6', 'glm-4.6v',
+  'glm-4.7',
+  'glm-5', 'glm-5-turbo', 'glm-5v-turbo',
+  'glm-5.1', 'glm-5.2',
+  'glm-5.3', 'glm-5.3-flash'
+]
+
 // 阿里 通义千问
 const qwenModels = [
   'qwen-turbo', 'qwen-plus', 'qwen-max', 'qwen-max-longcontext', 'qwen-long',
@@ -255,6 +265,7 @@ const allModelsList: string[] = [
   ...claudeModels,
   ...geminiModels,
   ...zhipuModels,
+  ...zcodeModels,
   ...qwenModels,
   ...deepseekModels,
   ...mistralModels,
@@ -271,8 +282,8 @@ const allModelsList: string[] = [
   ...perplexityModels
 ]
 
-// 转换为下拉选项格式
-export const allModels = allModelsList.map(m => ({ value: m, label: m }))
+// 转换为下拉选项格式（zcodeModels 与 zhipuModels 等列表间存在交集，需去重）
+export const allModels = Array.from(new Set(allModelsList)).map(m => ({ value: m, label: m }))
 
 // =====================
 // 预设映射
@@ -443,6 +454,7 @@ export function getModelsByPlatform(platform: string): string[] {
     case 'gemini': return geminiModels
     case 'antigravity': return antigravityModels
     case 'zhipu': return zhipuModels
+    case 'zcode': return zcodeModels
     case 'qwen': return qwenModels
     case 'deepseek': return deepseekModels
     case 'mistral': return mistralModels

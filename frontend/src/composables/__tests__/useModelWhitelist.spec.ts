@@ -4,7 +4,7 @@ vi.mock('@/api/admin/accounts', () => ({
   getAntigravityDefaultModelMapping: vi.fn()
 }))
 
-import { buildModelMappingObject, getModelsByPlatform, getPresetMappingsByPlatform, splitModelMappingObject } from '../useModelWhitelist'
+import { allModels, buildModelMappingObject, getModelsByPlatform, getPresetMappingsByPlatform, splitModelMappingObject } from '../useModelWhitelist'
 
 describe('useModelWhitelist', () => {
   it('openai 模型列表包含 GPT-5.4 官方快照', () => {
@@ -136,6 +136,23 @@ describe('useModelWhitelist', () => {
     expect(mapping).toEqual({
       'gpt-5.4-mini': 'gpt-5.4-mini'
     })
+  })
+
+  it('zcode 平台预填 GLM Coding Plan 模型目录而非 Claude', () => {
+    const models = getModelsByPlatform('zcode')
+
+    // 与后端 DefaultZcodeModelIDs() 对齐
+    expect(models).toContain('glm-5.3')
+    expect(models).toContain('glm-5.3-flash')
+    expect(models).toContain('glm-5.2')
+    expect(models).toContain('glm-4.7')
+    expect(models).not.toContain('claude-3-5-sonnet-20241022')
+    expect(models.every(m => m.startsWith('glm-'))).toBe(true)
+  })
+
+  it('allModels 下拉选项不含重复项（zcode 与 zhipu 目录交集）', () => {
+    const values = allModels.map(m => m.value)
+    expect(new Set(values).size).toBe(values.length)
   })
 
   it('combined 模式会同时保留白名单身份映射和模型映射', () => {
